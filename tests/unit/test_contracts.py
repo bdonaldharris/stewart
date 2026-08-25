@@ -2,9 +2,11 @@ import pytest
 from pydantic import ValidationError
 
 from stewart.contracts import (
+    IMPACT_OUTPUT_KEY,
     LORE_OUTPUT_KEY,
     RELATIONSHIP_OUTPUT_KEY,
     TIMELINE_OUTPUT_KEY,
+    ImpactResult,
     LoreResult,
     RelationshipResult,
     StewartNextStep,
@@ -81,3 +83,59 @@ def test_production_contract_handler_branches_for_each_specialist(
 
     assert isinstance(decision.result, result_model)
     assert decision.next_step is expected_step
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_step"),
+    [
+        ("COMPLETE", StewartNextStep.SYNTHESIZE),
+        ("NEEDS_INFORMATION", StewartNextStep.ASK_WRITER),
+    ],
+)
+def test_impact_contract_supports_both_statuses(
+    status: str,
+    expected_step: StewartNextStep,
+) -> None:
+    needs_information = status == "NEEDS_INFORMATION"
+    decision = handle_specialist_result(
+        IMPACT_OUTPUT_KEY,
+        {
+            "status": status,
+            "sources": [],
+            "assumptions_and_uncertainty": [],
+            "additional_writer_context_required": needs_information,
+            "clarification_question": "How central should this character become?"
+            if needs_information
+            else None,
+            "impact_summary": None if needs_information else "The choice creates a recurring arc.",
+            "risks": ["It may crowd an unresolved storyline."],
+            "opportunities": ["It can connect two existing teams."],
+            "affected_areas_and_entities": ["Nova Corps"],
+            "future_implications": ["Creates a sequel dependency."],
+            "audience_considerations": ["Established rules need a clear explanation."],
+            "tradeoffs": [],
+        },
+    )
+
+    assert isinstance(decision.result, ImpactResult)
+    assert decision.next_step is expected_step
+
+
+def test_complete_impact_requires_a_summary() -> None:
+    with pytest.raises(ValidationError, match="impact_summary"):
+        ImpactResult.model_validate(
+            {
+                "status": "COMPLETE",
+                "sources": [],
+                "assumptions_and_uncertainty": [],
+                "additional_writer_context_required": False,
+                "clarification_question": None,
+                "impact_summary": None,
+                "risks": [],
+                "opportunities": [],
+                "affected_areas_and_entities": [],
+                "future_implications": [],
+                "audience_considerations": [],
+                "tradeoffs": [],
+            }
+        )

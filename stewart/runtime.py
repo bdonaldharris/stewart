@@ -14,9 +14,11 @@ from google.genai import types
 
 from stewart.agent import root_agent
 from stewart.contracts import (
+    IMPACT_OUTPUT_KEY,
     LORE_OUTPUT_KEY,
     RELATIONSHIP_OUTPUT_KEY,
     TIMELINE_OUTPUT_KEY,
+    ImpactResult,
     LoreResult,
     RelationshipResult,
     SpecialistResult,
@@ -31,6 +33,7 @@ SPECIALIST_OUTPUT_KEYS = (
     LORE_OUTPUT_KEY,
     TIMELINE_OUTPUT_KEY,
     RELATIONSHIP_OUTPUT_KEY,
+    IMPACT_OUTPUT_KEY,
 )
 
 
@@ -66,6 +69,12 @@ class RunResult:
         """Return the current Relationship result, when Relationship participated."""
         result = self.specialist_results.get(RELATIONSHIP_OUTPUT_KEY)
         return result if isinstance(result, RelationshipResult) else None
+
+    @property
+    def impact_result(self) -> ImpactResult | None:
+        """Return the current Impact result, when Impact participated."""
+        result = self.specialist_results.get(IMPACT_OUTPUT_KEY)
+        return result if isinstance(result, ImpactResult) else None
 
 
 class _Runner(Protocol):
@@ -149,6 +158,8 @@ class StewartConversation:
             for output_key in SPECIALIST_OUTPUT_KEYS:
                 validated_output = event.actions.state_delta.get(output_key)
                 if validated_output is not None:
+                    if output_key != IMPACT_OUTPUT_KEY:
+                        self._specialist_results.pop(IMPACT_OUTPUT_KEY, None)
                     decision = handle_specialist_result(output_key, validated_output)
                     self._specialist_results[output_key] = decision.result
 
@@ -177,6 +188,8 @@ def _next_step(results: Mapping[str, SpecialistResult]) -> StewartNextStep | Non
         return None
     if any(result.status is SpecialistStatus.NEEDS_INFORMATION for result in results.values()):
         return StewartNextStep.ASK_WRITER
+    if IMPACT_OUTPUT_KEY not in results:
+        return StewartNextStep.ANALYZE_IMPACT
     return StewartNextStep.SYNTHESIZE
 
 
@@ -185,6 +198,7 @@ def _clarification_fallback(results: Mapping[str, SpecialistResult]) -> str:
         LORE_OUTPUT_KEY: "Lore",
         TIMELINE_OUTPUT_KEY: "Timeline",
         RELATIONSHIP_OUTPUT_KEY: "Relationship",
+        IMPACT_OUTPUT_KEY: "Impact",
     }
     questions = [
         (labels[output_key], result.clarification_question)

@@ -21,8 +21,7 @@ Stewart dynamically delegates investigation to specialized agents:
 - Lore Agent
 - Timeline Agent
 - Relationship Agent
-
-Impact Agent is intentionally deferred.
+- Impact Agent
 
 ### Dynamic Discovery
 
@@ -30,8 +29,9 @@ Specialist agents discover relevant information at runtime using connected knowl
 
 ### Multi-Agent Analysis
 
-Relevant specialists run independent investigations concurrently through ADK
-and provide typed findings back to Stewart, who synthesizes the results.
+Relevant discovery specialists run independent investigations concurrently
+through ADK. Stewart passes their typed findings to Impact for consequence
+analysis before synthesizing the results.
 
 ### Stewardship Report
 
@@ -40,6 +40,7 @@ Stewart presents:
 - Findings
 - Risks
 - Opportunities
+- Audience considerations
 - Options
 - Tradeoffs
 
@@ -55,7 +56,6 @@ The following are intentionally out of scope:
 - Automated creative approval or rejection
 - Production-scale governance workflows
 - Enterprise user management
-- Impact Agent
 
 ## Success Criteria
 
