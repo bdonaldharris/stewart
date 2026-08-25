@@ -58,6 +58,7 @@ Planned for a later slice; it is not implemented yet.
 - [Demo Scenario](docs/demo-scenario.md)
 - [Architecture](docs/architecture.md)
 - [Feature Slice](docs/feature-slice.md)
+- [Technology Stack](docs/technology-stack.md)
 
 ## Hackathon
 
