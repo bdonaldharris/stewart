@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from stewart.contracts import SpecialistStatus
+from stewart.contracts import SpecialistStatus, StewartNextStep
 from stewart.runtime import run_proposal
 
 
@@ -18,7 +18,7 @@ def _has_gemini_credentials() -> bool:
 
 
 @pytest.mark.integration
-def test_live_stewart_concurrent_specialist_parallel_slice() -> None:
+def test_live_stewart_discovery_to_impact_slice() -> None:
     if os.getenv("RUN_STEWART_INTEGRATION") != "1":
         pytest.skip("set RUN_STEWART_INTEGRATION=1 to run live agent integration")
     if not _has_gemini_credentials() or not os.getenv("PARALLEL_API_KEY"):
@@ -29,7 +29,8 @@ def test_live_stewart_concurrent_specialist_parallel_slice() -> None:
             "Introduce a recurring cosmic archivist immediately after Avengers: Endgame. The "
             "archivist once worked with the Nova Corps, has a strained alliance with the "
             "Guardians of the Galaxy, and can preserve memories from destroyed worlds. "
-            "Investigate the relevant lore, chronology, and relationships."
+            "Investigate the lore, chronology, relationships, and resulting narrative impact, "
+            "including risks, opportunities, audience considerations, and tradeoffs."
         )
     )
 
@@ -39,11 +40,12 @@ def test_live_stewart_concurrent_specialist_parallel_slice() -> None:
     assert result.timeline_result is not None
     assert result.relationship_result is not None
 
-    for agent_name, specialist_result in [
+    discovery_results = [
         ("lore_agent", result.lore_result),
         ("timeline_agent", result.timeline_result),
         ("relationship_agent", result.relationship_result),
-    ]:
+    ]
+    for agent_name, specialist_result in discovery_results:
         assert agent_name in result.agent_authors
         if specialist_result.status is SpecialistStatus.COMPLETE:
             assert specialist_result.findings
@@ -54,7 +56,32 @@ def test_live_stewart_concurrent_specialist_parallel_slice() -> None:
             assert specialist_result.clarification_question
             assert specialist_result.clarification_question.strip()
 
-    assert "parallel_search" in result.tool_calls or any(
+    if any(
         specialist.status is SpecialistStatus.NEEDS_INFORMATION
-        for specialist in result.specialist_results.values()
+        for _, specialist in discovery_results
+    ):
+        assert result.next_step is StewartNextStep.ASK_WRITER
+        return
+
+    assert result.impact_result is not None
+    assert "impact_agent" in result.agent_authors
+    assert result.tool_calls.index("impact_agent") > max(
+        result.tool_calls.index(agent_name) for agent_name, _ in discovery_results
     )
+
+    if result.impact_result.status is SpecialistStatus.NEEDS_INFORMATION:
+        assert result.next_step is StewartNextStep.ASK_WRITER
+        assert result.impact_result.clarification_question
+        assert result.impact_result.clarification_question.strip()
+    else:
+        assert result.impact_result.status is SpecialistStatus.COMPLETE
+        assert result.next_step is StewartNextStep.SYNTHESIZE
+        assert result.impact_result.impact_summary
+        assert any(
+            [
+                result.impact_result.risks,
+                result.impact_result.opportunities,
+                result.impact_result.audience_considerations,
+                result.impact_result.tradeoffs,
+            ]
+        )

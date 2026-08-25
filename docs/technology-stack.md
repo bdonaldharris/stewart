@@ -22,13 +22,18 @@ Vercel will host the React frontend.
 - **Google Agent Development Kit (ADK)** — multi-agent framework
 - **Gemini** — reasoning model for Stewart and specialist agents
 
-Stewart is the supervisor agent and the only writer-facing agent. Lore, Timeline, Relationship, and later Impact are separate Gemini specialist agents coordinated by Stewart.
+Stewart is the supervisor agent and the only writer-facing agent. Lore,
+Timeline, Relationship, and Impact are separate Gemini specialist agents
+coordinated by Stewart.
 
 ## Discovery
 
 - **Parallel**
 
-Specialist agents use Parallel at runtime to discover the information required for the active investigation. Stewart does not maintain a permanent MCU knowledge base.
+Lore, Timeline, and Relationship use Parallel at runtime to discover the
+information required for the active investigation. Impact analyzes their
+combined findings without direct Parallel access. Stewart does not maintain a
+permanent MCU knowledge base.
 
 ## Investigation State
 

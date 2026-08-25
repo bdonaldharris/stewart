@@ -23,6 +23,7 @@ LoreStatus = SpecialistStatus
 LORE_OUTPUT_KEY = "lore_result"
 TIMELINE_OUTPUT_KEY = "timeline_result"
 RELATIONSHIP_OUTPUT_KEY = "relationship_result"
+IMPACT_OUTPUT_KEY = "impact_result"
 
 
 class EvidenceSource(BaseModel):
@@ -130,12 +131,44 @@ class RelationshipResult(_SpecialistResultBase):
     findings: list[RelationshipFinding] = Field(default_factory=list)
 
 
-SpecialistResult: TypeAlias = LoreResult | TimelineResult | RelationshipResult
+class ImpactTradeoff(BaseModel):
+    """The practical upside and cost of one creative approach."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    approach: str = Field(min_length=1)
+    benefits: list[str] = Field(default_factory=list)
+    costs: list[str] = Field(default_factory=list)
+
+
+class ImpactResult(_SpecialistResultBase):
+    """The predictable consequence analysis returned by Impact to Stewart."""
+
+    impact_summary: str | None = None
+    risks: list[str] = Field(default_factory=list)
+    opportunities: list[str] = Field(default_factory=list)
+    affected_areas_and_entities: list[str] = Field(default_factory=list)
+    future_implications: list[str] = Field(default_factory=list)
+    audience_considerations: list[str] = Field(default_factory=list)
+    tradeoffs: list[ImpactTradeoff] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_complete_summary(self) -> ImpactResult:
+        """Require a useful synthesis when Impact completes."""
+        if self.status is SpecialistStatus.COMPLETE and (
+            not self.impact_summary or not self.impact_summary.strip()
+        ):
+            raise ValueError("COMPLETE Impact result requires an impact_summary")
+        return self
+
+
+SpecialistResult: TypeAlias = LoreResult | TimelineResult | RelationshipResult | ImpactResult
 
 
 class StewartNextStep(StrEnum):
     """Deterministic status interpretation owned by Stewart."""
 
+    ANALYZE_IMPACT = "ANALYZE_IMPACT"
     SYNTHESIZE = "SYNTHESIZE"
     ASK_WRITER = "ASK_WRITER"
 
@@ -160,6 +193,7 @@ _RESULT_MODELS: dict[str, type[SpecialistResult]] = {
     LORE_OUTPUT_KEY: LoreResult,
     TIMELINE_OUTPUT_KEY: TimelineResult,
     RELATIONSHIP_OUTPUT_KEY: RelationshipResult,
+    IMPACT_OUTPUT_KEY: ImpactResult,
 }
 
 

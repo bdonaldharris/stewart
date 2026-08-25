@@ -10,8 +10,11 @@ A creative team is developing a new story within a large interconnected cinemati
 2. Stewart evaluates whether enough information exists to begin the investigation.
 3. If context is missing, Stewart asks targeted questions.
 4. Stewart selects relevant specialists and delegates independent analysis concurrently.
-5. Specialist agents investigate their assigned domains using Parallel.
-6. Stewart synthesizes findings and presents a stewardship report.
+5. Discovery specialists investigate their assigned domains using Parallel.
+6. Stewart passes the combined findings to Impact.
+7. Impact analyzes wider consequences, opportunities, audience considerations,
+   and tradeoffs.
+8. Stewart synthesizes the full investigation into writer-facing guidance.
 
 ## Example Proposal
 
@@ -41,7 +44,13 @@ Evaluates:
 - Team dynamics
 - Organizational connections
 
-Impact analysis is reserved for a later slice and is not part of this demo.
+### Impact Agent
+
+Evaluates:
+- Narrative weight and consequence scale
+- Existing and future story effects
+- Audience-facing continuity expectations
+- Risks, opportunities, informed options, and tradeoffs
 
 ## Final Outcome
 

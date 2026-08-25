@@ -44,7 +44,8 @@ Evaluates character, team, and organization relationships affected by a proposal
 
 ### Impact Agent
 
-Planned for a later slice; it is not implemented yet.
+Analyzes combined narrative consequences, risks, opportunities, audience
+considerations, future implications, and creative tradeoffs.
 
 ## Architecture Principles
 
@@ -64,30 +65,32 @@ Planned for a later slice; it is not implemented yet.
 
 Built for the Agentic Cinema: The Blockbuster Hackathon using Gemini and Google Cloud Agent Builder.
 
-## Concurrent Specialist Slice
+## Discovery-to-Impact Slice
 
 The executable slice proves this path:
 
 ```text
                    +-> Lore ---------> Parallel --+
-Writer -> Stewart -+-> Timeline -----> Parallel --+-> Stewart -> Writer
-                   +-> Relationship -> Parallel --+
+                   +-> Timeline -----> Parallel --+
+Writer -> Stewart -+-> Relationship -> Parallel --+-> Impact -> Stewart -> Writer
 ```
 
-Stewart, Lore, Timeline, and Relationship are separate Google ADK agents. The
-three specialists run as Stewart's `single_turn` subagents. Stewart selects only
-the domains relevant to a proposal and emits independent delegations together;
-ADK executes multiple tool calls concurrently and returns every result to
-Stewart for synthesis. Specialists do not communicate with one another or the
-writer.
+Stewart and its four specialists are separate Google ADK agents. Lore,
+Timeline, and Relationship run as independent `single_turn` discovery agents.
+Stewart selects only the domains relevant to a proposal and emits those
+delegations together; ADK executes multiple tool calls concurrently and returns
+every result to Stewart. Stewart then delegates the combined session-scoped
+findings to Impact in the next model turn. Specialists communicate only with
+Stewart, never with one another or the writer.
 
 Each specialist stores a schema-validated result in ADK session state, and the
 runtime deterministically branches on the accumulated `COMPLETE` and
-`NEEDS_INFORMATION` statuses. All three specialists can call the same shared
-Parallel tool; Stewart cannot. Parallel search is asynchronous, has an explicit
-timeout, and closes its scoped client after each tool call. Retrieved excerpts
-and specialist results exist only in the in-memory investigation session. This
-slice adds no MCU data store, persistence, or Impact Agent.
+`NEEDS_INFORMATION` statuses, with an observable `ANALYZE_IMPACT` stage between
+completed discovery and final synthesis. The three discovery specialists can
+call the same shared Parallel tool; Stewart and Impact cannot. Impact receives
+the available discovery result keys directly from temporary ADK session state.
+Parallel search is asynchronous, has an explicit timeout, and closes its scoped
+client after each tool call. Nothing is persisted after the investigation.
 
 ### Local setup
 
@@ -137,13 +140,12 @@ Pass a proposal directly:
 uv run stewart "Introduce a cosmic archivist connected to the Nova Corps after Endgame."
 ```
 
-Or run `uv run stewart` and enter the proposal at the prompt. If any specialist
+Or run `uv run stewart` and enter the proposal at the prompt. The CLI shows
+concise operational statuses for discovery and Impact. If any specialist
 returns `NEEDS_INFORMATION`, Stewart asks for the needed clarification and the
 CLI accepts the writer's answer in the same in-memory ADK session. Stewart can
-then re-delegate to the requesting or otherwise affected specialists while
-retaining completed results. This loop continues until the investigation
-completes or the writer enters `exit` or `quit`. Nothing is retained after the
-process exits.
+then re-delegate to Impact and/or affected discovery specialists while
+retaining completed results. Nothing is retained after the process exits.
 
 ### Run validation
 
@@ -162,10 +164,11 @@ RUN_STEWART_INTEGRATION=1 uv run pytest -m integration -s
 ```
 
 It requires the same Gemini configuration used by the CLI plus
-`PARALLEL_API_KEY`. The test verifies trace evidence for the three separate
-specialists and accepts either valid contract status from each. Completed
-results must contain Parallel evidence; the test does not replace the
-architecture with mocks.
+`PARALLEL_API_KEY`. The test accepts either valid contract status from each
+specialist. When discovery completes, it verifies that Impact runs afterward
+and returns useful structured analysis. Completed discovery results must
+contain Parallel evidence; the test does not replace the architecture with
+mocks.
 
 ### Implementation map
 
@@ -173,6 +176,7 @@ architecture with mocks.
 - `stewart/lore_agent.py` — separate Lore Gemini subagent
 - `stewart/timeline_agent.py` — separate Timeline Gemini subagent
 - `stewart/relationship_agent.py` — separate Relationship Gemini subagent
+- `stewart/impact_agent.py` — separate Impact Gemini synthesis subagent
 - `stewart/contracts.py` — typed specialist results and deterministic branch decisions
 - `stewart/parallel_search.py` — async official Parallel SDK integration
 - `stewart/runtime.py` — accumulated contract handling and multi-turn ADK session

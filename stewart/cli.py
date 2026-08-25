@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from typing import TYPE_CHECKING
 
 from stewart.config import load_environment
+
+if TYPE_CHECKING:
+    from stewart.runtime import RunResult
 
 EXIT_COMMANDS = {"exit", "quit"}
 
@@ -39,6 +43,7 @@ async def _run_conversation(proposal: str) -> None:
 
     while True:
         result = await conversation.send(writer_message)
+        _print_activity(result)
         print(f"\nStewart:\n{result.response}")
         if not result.needs_writer_input:
             return
@@ -49,6 +54,23 @@ async def _run_conversation(proposal: str) -> None:
             return
         if writer_message.lower() in EXIT_COMMANDS:
             return
+
+
+def _print_activity(result: RunResult) -> None:
+    """Show operational specialist status without exposing model reasoning."""
+    specialists = [
+        ("Lore", result.lore_result),
+        ("Timeline", result.timeline_result),
+        ("Relationship", result.relationship_result),
+        ("Impact", result.impact_result),
+    ]
+    active = [(name, specialist) for name, specialist in specialists if specialist is not None]
+    if not active:
+        return
+    print("\nInvestigation status:")
+    for name, specialist in active:
+        status = specialist.status.value.lower().replace("_", " ")
+        print(f"{name} Agent: {status}")
 
 
 if __name__ == "__main__":
