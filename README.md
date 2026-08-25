@@ -62,3 +62,106 @@ Evaluates broader narrative consequences, opportunities, and tradeoffs.
 ## Hackathon
 
 Built for the Agentic Cinema: The Blockbuster Hackathon using Gemini and Google Cloud Agent Builder.
+
+## First Vertical Slice
+
+The executable slice proves this path:
+
+```text
+Writer proposal -> Stewart Gemini supervisor -> Lore Gemini specialist
+                -> Parallel Search at runtime -> structured Lore result
+                -> Stewart synthesis -> writer response
+```
+
+Stewart and Lore are separate Google ADK agents. Lore runs as Stewart's
+`single_turn` subagent, so ADK supplies the delegation tool and automatically
+returns control to Stewart. Lore stores its schema-validated result in the
+turn's ADK state, and Stewart's runtime deterministically branches on
+`COMPLETE` versus `NEEDS_INFORMATION`. Only Lore can call Parallel. Parallel
+search is asynchronous, has an explicit timeout, and closes its scoped client
+after each tool call. Retrieved excerpts exist only in the in-memory
+investigation session; this slice adds no MCU data store or persistence.
+
+### Local setup
+
+Prerequisites:
+
+- Python 3.11-3.13
+- [`uv`](https://docs.astral.sh/uv/)
+- A Gemini Developer API key, or Google Cloud Application Default Credentials
+  for a Vertex AI project
+- A Parallel API key
+
+Install dependencies and create local configuration:
+
+```bash
+uv sync --extra dev
+cp .env.example .env
+```
+
+For the Gemini Developer API, set:
+
+```dotenv
+GOOGLE_API_KEY=
+PARALLEL_API_KEY=
+```
+
+For Vertex AI, authenticate Application Default Credentials and set:
+
+```dotenv
+GOOGLE_GENAI_USE_VERTEXAI=true
+GOOGLE_CLOUD_PROJECT=
+GOOGLE_CLOUD_LOCATION=global
+PARALLEL_API_KEY=
+```
+
+`STEWART_MODEL` is optional and defaults to `gemini-flash-latest`. If
+overridden, use a current Gemini 3 or newer model that supports function tools
+with structured output.
+
+### Run the slice
+
+Pass a proposal directly:
+
+```bash
+uv run stewart "Introduce a cosmic archivist connected to the Nova Corps after Endgame."
+```
+
+Or run `uv run stewart` and enter the proposal at the prompt. If Lore returns
+`NEEDS_INFORMATION`, Stewart asks the validated clarification question and the
+CLI accepts the writer's answer in the same in-memory ADK session. Stewart can
+then re-delegate to Lore with the accumulated investigation context. This loop
+continues until Lore completes the investigation or the writer enters `exit`
+or `quit`. Nothing is retained after the process exits.
+
+### Run validation
+
+Unit tests do not require credentials:
+
+```bash
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+```
+
+The live integration test is opt-in because it calls both Gemini and Parallel:
+
+```bash
+RUN_STEWART_INTEGRATION=1 uv run pytest -m integration -s
+```
+
+It requires the same Gemini configuration used by the CLI plus
+`PARALLEL_API_KEY`. The test verifies trace evidence that Stewart invoked the
+separate Lore agent and Lore called `parallel_search`; it does not replace the
+architecture with mocks.
+
+### Implementation map
+
+- `stewart/agent.py` — Stewart supervisor and ADK application
+- `stewart/lore_agent.py` — separate Lore Gemini subagent
+- `stewart/contracts.py` — typed Lore result and deterministic branch decision
+- `stewart/parallel_search.py` — async official Parallel SDK integration
+- `stewart/runtime.py` — production contract handling and multi-turn ADK session
+- `stewart/cli.py` — clarification loop over one temporary investigation
+- `tests/unit/` — production runtime, contract, Parallel, CLI, and topology tests
+- `tests/integration/` — credentialed end-to-end agent trace test
