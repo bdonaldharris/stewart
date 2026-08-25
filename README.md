@@ -147,6 +147,41 @@ CLI accepts the writer's answer in the same in-memory ADK session. Stewart can
 then re-delegate to Impact and/or affected discovery specialists while
 retaining completed results. Nothing is retained after the process exits.
 
+### Run the Writer's Room frontend
+
+The first Writer's Room interface lives in `frontend/` and is a React, Vite,
+and Tailwind application. It presents the same Stewart-led flow as an
+event-driven browser experience: writer conversation, concurrent discovery,
+Impact analysis after discovery fans in, and a final stewardship report.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The local frontend uses an explicitly labeled development fixture by default.
+The fixture emits the same typed event contract consumed by the interface and
+advances only when **Advance fixture** is selected; it does not make live
+Gemini or Parallel claims. The entry screen also includes a clarification-path
+toggle for exercising Stewart's multi-turn conversation before investigation.
+
+Set `VITE_STEWART_DEMO_FIXTURE=false` to disable the fixture. A browser
+transport for the existing Python runtime is intentionally not part of this
+slice; the frontend's event-source boundary is the integration point for that
+future adapter, without changing the agent topology or backend contracts.
+
+Frontend validation and production output:
+
+```bash
+npm run lint
+npm test
+npm run build
+```
+
+Vercel configuration is included in `frontend/vercel.json`, with
+`frontend/` as the deployment root.
+
 ### Run validation
 
 Unit tests do not require credentials:
