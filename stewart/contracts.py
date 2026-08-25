@@ -1,33 +1,66 @@
-"""Structured contract shared between Lore and Stewart."""
+"""Structured contracts shared between Stewart and its specialists."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class LoreStatus(StrEnum):
-    """Logical completion states available to the Lore specialist."""
+class SpecialistStatus(StrEnum):
+    """Logical completion states available to every specialist."""
 
     COMPLETE = "COMPLETE"
     NEEDS_INFORMATION = "NEEDS_INFORMATION"
 
 
+# Preserve the established Lore name while sharing the same status contract.
+LoreStatus = SpecialistStatus
+
 LORE_OUTPUT_KEY = "lore_result"
+TIMELINE_OUTPUT_KEY = "timeline_result"
+RELATIONSHIP_OUTPUT_KEY = "relationship_result"
 
 
 class EvidenceSource(BaseModel):
-    """A web source returned by Parallel and used in Lore's analysis."""
+    """A web source returned by Parallel and used in specialist analysis."""
 
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(min_length=1)
     url: str = Field(min_length=1)
     excerpts: list[str] = Field(default_factory=list)
+
+
+class _SpecialistResultBase(BaseModel):
+    """Status and evidence fields shared by all specialist contracts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: SpecialistStatus
+    sources: list[EvidenceSource] = Field(default_factory=list)
+    assumptions_and_uncertainty: list[str] = Field(default_factory=list)
+    additional_writer_context_required: bool
+    clarification_question: str | None = None
+
+    @model_validator(mode="after")
+    def validate_status_fields(self) -> _SpecialistResultBase:
+        """Keep status and clarification fields internally consistent."""
+        if self.status is SpecialistStatus.NEEDS_INFORMATION:
+            if not self.additional_writer_context_required:
+                raise ValueError(
+                    "NEEDS_INFORMATION requires additional_writer_context_required=true"
+                )
+            if not self.clarification_question or not self.clarification_question.strip():
+                raise ValueError("NEEDS_INFORMATION requires a clarification_question")
+        elif self.additional_writer_context_required:
+            raise ValueError("COMPLETE cannot require additional writer context")
+        elif self.clarification_question is not None:
+            raise ValueError("COMPLETE cannot include a clarification_question")
+        return self
 
 
 class LoreFinding(BaseModel):
@@ -46,33 +79,58 @@ class LoreFinding(BaseModel):
     source_urls: list[str] = Field(default_factory=list)
 
 
-class LoreResult(BaseModel):
-    """The predictable response contract returned by Lore to Stewart."""
+class TimelineFinding(BaseModel):
+    """A chronological observation tied to discovered evidence."""
 
     model_config = ConfigDict(extra="forbid")
 
-    status: LoreStatus
-    findings: list[LoreFinding] = Field(default_factory=list)
-    sources: list[EvidenceSource] = Field(default_factory=list)
-    assumptions_and_uncertainty: list[str] = Field(default_factory=list)
-    additional_writer_context_required: bool
-    clarification_question: str | None = None
+    finding: str = Field(min_length=1)
+    chronological_relevance: str = Field(min_length=1)
+    chronology_status: Literal[
+        "CONSISTENT",
+        "POTENTIAL_CONTRADICTION",
+        "TEMPORAL_DEPENDENCY",
+        "UNCERTAIN",
+    ]
+    source_urls: list[str] = Field(default_factory=list)
 
-    @model_validator(mode="after")
-    def validate_status_fields(self) -> LoreResult:
-        """Keep status and clarification fields internally consistent."""
-        if self.status is LoreStatus.NEEDS_INFORMATION:
-            if not self.additional_writer_context_required:
-                raise ValueError(
-                    "NEEDS_INFORMATION requires additional_writer_context_required=true"
-                )
-            if not self.clarification_question or not self.clarification_question.strip():
-                raise ValueError("NEEDS_INFORMATION requires a clarification_question")
-        elif self.additional_writer_context_required:
-            raise ValueError("COMPLETE cannot require additional writer context")
-        elif self.clarification_question is not None:
-            raise ValueError("COMPLETE cannot include a clarification_question")
-        return self
+
+class RelationshipFinding(BaseModel):
+    """A character or organization relationship observation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    finding: str = Field(min_length=1)
+    relationship_relevance: str = Field(min_length=1)
+    relationship_type: Literal[
+        "CHARACTER",
+        "TEAM",
+        "ORGANIZATION",
+        "IDEOLOGICAL",
+        "UNCERTAIN",
+    ]
+    source_urls: list[str] = Field(default_factory=list)
+
+
+class LoreResult(_SpecialistResultBase):
+    """The predictable response contract returned by Lore to Stewart."""
+
+    findings: list[LoreFinding] = Field(default_factory=list)
+
+
+class TimelineResult(_SpecialistResultBase):
+    """The predictable response contract returned by Timeline to Stewart."""
+
+    findings: list[TimelineFinding] = Field(default_factory=list)
+
+
+class RelationshipResult(_SpecialistResultBase):
+    """The predictable response contract returned by Relationship to Stewart."""
+
+    findings: list[RelationshipFinding] = Field(default_factory=list)
+
+
+SpecialistResult: TypeAlias = LoreResult | TimelineResult | RelationshipResult
 
 
 class StewartNextStep(StrEnum):
@@ -83,32 +141,46 @@ class StewartNextStep(StrEnum):
 
 
 @dataclass(frozen=True)
-class LoreBranchDecision:
-    """Deterministic decision Stewart makes from validated Lore output."""
+class SpecialistBranchDecision:
+    """Deterministic decision Stewart makes from one validated result."""
 
-    result: LoreResult
+    output_key: str
+    result: SpecialistResult
     next_step: StewartNextStep
 
     @property
     def writer_response_override(self) -> str | None:
-        """Return the exact clarification Stewart must surface, when required."""
+        """Return the clarification fallback, when one is required."""
         if self.next_step is StewartNextStep.ASK_WRITER:
             return self.result.clarification_question
         return None
 
 
-def handle_lore_result(
-    validated_output: LoreResult | Mapping[str, object],
-) -> LoreBranchDecision:
-    """Validate ADK's structured output and select Stewart's production branch."""
+_RESULT_MODELS: dict[str, type[SpecialistResult]] = {
+    LORE_OUTPUT_KEY: LoreResult,
+    TIMELINE_OUTPUT_KEY: TimelineResult,
+    RELATIONSHIP_OUTPUT_KEY: RelationshipResult,
+}
+
+
+def handle_specialist_result(
+    output_key: str,
+    validated_output: SpecialistResult | Mapping[str, object],
+) -> SpecialistBranchDecision:
+    """Validate ADK structured output and select Stewart's production branch."""
+    try:
+        result_model = _RESULT_MODELS[output_key]
+    except KeyError as error:
+        raise ValueError(f"Unknown specialist output key: {output_key}") from error
+
     result = (
         validated_output
-        if isinstance(validated_output, LoreResult)
-        else LoreResult.model_validate(validated_output)
+        if isinstance(validated_output, result_model)
+        else result_model.model_validate(validated_output)
     )
     next_step = (
         StewartNextStep.ASK_WRITER
-        if result.status is LoreStatus.NEEDS_INFORMATION
+        if result.status is SpecialistStatus.NEEDS_INFORMATION
         else StewartNextStep.SYNTHESIZE
     )
-    return LoreBranchDecision(result=result, next_step=next_step)
+    return SpecialistBranchDecision(output_key=output_key, result=result, next_step=next_step)

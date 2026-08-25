@@ -30,7 +30,7 @@ def main() -> None:
 
 
 async def _run_conversation(proposal: str) -> None:
-    """Keep one ADK session alive across any Lore clarification turns."""
+    """Keep one ADK session alive across specialist clarification turns."""
     # Import after loading .env so agent model configuration sees local values.
     from stewart.runtime import StewartConversation
 

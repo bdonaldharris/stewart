@@ -38,7 +38,7 @@ Analyzes character, team, and organization relationships affected by a proposal.
 
 ### Impact Agent
 
-Analyzes broader consequences, opportunities, and tradeoffs based on specialist findings.
+Planned for a later slice and intentionally absent from the current implementation.
 
 ## Communication Model
 
@@ -52,25 +52,25 @@ Writer
   v
 Stewart
   |
-  +--> Lore Agent
+  +--> Lore Agent ---------> Parallel
+  +--> Timeline Agent ------> Parallel
+  +--> Relationship Agent --> Parallel
   |
-  +--> Timeline Agent
-  |
-  +--> Relationship Agent
-          |
-          v
-      Impact Agent
-          |
-          v
-Stewardship Report
+  v
+Writer-facing synthesis or clarification
 ```
+
+Stewart dynamically selects relevant specialists. When more than one selected
+investigation is independent, Stewart emits those single-turn delegations
+together and ADK executes them concurrently. Results fan back in to Stewart;
+there is no specialist-to-specialist path.
 
 ## Investigation Loop
 
 1. Stewart receives a proposal.
 2. Stewart determines whether clarification is needed.
-3. Stewart delegates investigation.
-4. Specialists discover and analyze information.
+3. Stewart delegates relevant investigations, concurrently when independent.
+4. Specialists discover and analyze information through the shared Parallel tool.
 5. Specialists report completion or request additional context.
 6. Stewart obtains missing information from the writer when necessary.
 7. Stewart determines when enough information exists for synthesis.
@@ -83,3 +83,5 @@ Stewart does not maintain a permanent universe database.
 Information is dynamically discovered during investigations and used within temporary session context.
 
 The system focuses on intelligent investigation rather than storing an entire fictional universe.
+Multiple validated specialist results can coexist in the same in-memory session,
+including across a writer clarification turn. Nothing is persisted after that session.
