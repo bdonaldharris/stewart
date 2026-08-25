@@ -1,8 +1,8 @@
-"""In-memory local runtime for the first Stewart vertical slice."""
+"""In-memory runtime for Stewart's concurrent specialist slice."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import uuid4
@@ -15,29 +15,57 @@ from google.genai import types
 from stewart.agent import root_agent
 from stewart.contracts import (
     LORE_OUTPUT_KEY,
-    LoreBranchDecision,
+    RELATIONSHIP_OUTPUT_KEY,
+    TIMELINE_OUTPUT_KEY,
     LoreResult,
+    RelationshipResult,
+    SpecialistResult,
+    SpecialistStatus,
     StewartNextStep,
-    handle_lore_result,
+    TimelineResult,
+    handle_specialist_result,
 )
 
 APP_NAME = "stewart"
+SPECIALIST_OUTPUT_KEYS = (
+    LORE_OUTPUT_KEY,
+    TIMELINE_OUTPUT_KEY,
+    RELATIONSHIP_OUTPUT_KEY,
+)
 
 
 @dataclass(frozen=True)
 class RunResult:
-    """One Stewart turn plus contract and trace evidence."""
+    """One Stewart turn plus accumulated contract and trace evidence."""
 
     response: str
     agent_authors: tuple[str, ...]
     tool_calls: tuple[str, ...]
     next_step: StewartNextStep | None
-    lore_result: LoreResult | None
+    specialist_results: Mapping[str, SpecialistResult]
 
     @property
     def needs_writer_input(self) -> bool:
         """Whether Stewart is waiting for clarification from the writer."""
         return self.next_step is StewartNextStep.ASK_WRITER
+
+    @property
+    def lore_result(self) -> LoreResult | None:
+        """Return the current Lore result, when Lore participated."""
+        result = self.specialist_results.get(LORE_OUTPUT_KEY)
+        return result if isinstance(result, LoreResult) else None
+
+    @property
+    def timeline_result(self) -> TimelineResult | None:
+        """Return the current Timeline result, when Timeline participated."""
+        result = self.specialist_results.get(TIMELINE_OUTPUT_KEY)
+        return result if isinstance(result, TimelineResult) else None
+
+    @property
+    def relationship_result(self) -> RelationshipResult | None:
+        """Return the current Relationship result, when Relationship participated."""
+        result = self.specialist_results.get(RELATIONSHIP_OUTPUT_KEY)
+        return result if isinstance(result, RelationshipResult) else None
 
 
 class _Runner(Protocol):
@@ -63,6 +91,7 @@ class StewartConversation:
     ) -> None:
         self._runner = runner
         self._session_service = session_service
+        self._specialist_results: dict[str, SpecialistResult] = {}
         self.user_id = user_id
         self.session_id = session_id
 
@@ -104,7 +133,6 @@ class StewartConversation:
         final_response: str | None = None
         authors: list[str] = []
         tool_calls: list[str] = []
-        lore_decision: LoreBranchDecision | None = None
 
         async for event in self._runner.run_async(
             user_id=self.user_id,
@@ -118,17 +146,20 @@ class StewartConversation:
                     if part.function_call and part.function_call.name:
                         tool_calls.append(part.function_call.name)
 
-            validated_lore_output = event.actions.state_delta.get(LORE_OUTPUT_KEY)
-            if validated_lore_output is not None:
-                lore_decision = handle_lore_result(validated_lore_output)
+            for output_key in SPECIALIST_OUTPUT_KEYS:
+                validated_output = event.actions.state_delta.get(output_key)
+                if validated_output is not None:
+                    decision = handle_specialist_result(output_key, validated_output)
+                    self._specialist_results[output_key] = decision.result
 
             if event.author == root_agent.name and event.is_final_response():
                 event_text = _text_from_event(event)
                 if event_text:
                     final_response = event_text
 
-        if final_response is None and lore_decision and lore_decision.writer_response_override:
-            final_response = lore_decision.writer_response_override
+        next_step = _next_step(self._specialist_results)
+        if final_response is None and next_step is StewartNextStep.ASK_WRITER:
+            final_response = _clarification_fallback(self._specialist_results)
         if final_response is None:
             raise RuntimeError("Stewart completed without a final writer response")
 
@@ -136,9 +167,35 @@ class StewartConversation:
             response=final_response,
             agent_authors=tuple(authors),
             tool_calls=tuple(tool_calls),
-            next_step=lore_decision.next_step if lore_decision else None,
-            lore_result=lore_decision.result if lore_decision else None,
+            next_step=next_step,
+            specialist_results=dict(self._specialist_results),
         )
+
+
+def _next_step(results: Mapping[str, SpecialistResult]) -> StewartNextStep | None:
+    if not results:
+        return None
+    if any(result.status is SpecialistStatus.NEEDS_INFORMATION for result in results.values()):
+        return StewartNextStep.ASK_WRITER
+    return StewartNextStep.SYNTHESIZE
+
+
+def _clarification_fallback(results: Mapping[str, SpecialistResult]) -> str:
+    labels = {
+        LORE_OUTPUT_KEY: "Lore",
+        TIMELINE_OUTPUT_KEY: "Timeline",
+        RELATIONSHIP_OUTPUT_KEY: "Relationship",
+    }
+    questions = [
+        (labels[output_key], result.clarification_question)
+        for output_key, result in results.items()
+        if result.status is SpecialistStatus.NEEDS_INFORMATION and result.clarification_question
+    ]
+    if len(questions) == 1:
+        return questions[0][1]
+    return "I need a little more context:\n" + "\n".join(
+        f"- {label}: {question}" for label, question in questions
+    )
 
 
 def _text_from_event(event: Event) -> str | None:

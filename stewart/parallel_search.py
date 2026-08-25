@@ -31,7 +31,7 @@ class _AsyncParallelSearchApi(Protocol):
 
 
 class ParallelSource(BaseModel):
-    """The provider response fields Lore is allowed to receive."""
+    """The provider response fields specialists are allowed to receive."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -42,7 +42,7 @@ class ParallelSource(BaseModel):
 
 
 class ParallelSearchResponse(BaseModel):
-    """Sanitized Parallel response exposed to the Lore tool."""
+    """Sanitized Parallel response exposed to the specialist tool."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -63,7 +63,7 @@ class ParallelSearchClient:
         resolved_key = api_key or os.getenv("PARALLEL_API_KEY")
         if client is None and not resolved_key:
             raise ParallelConfigurationError(
-                "PARALLEL_API_KEY is required for runtime lore discovery"
+                "PARALLEL_API_KEY is required for runtime specialist discovery"
             )
         self._client = client
         self._api_key = resolved_key
@@ -99,7 +99,9 @@ class ParallelSearchClient:
         if not normalized_queries:
             raise ParallelRequestError("At least one non-empty search query is required")
         if len(normalized_queries) > 5:
-            raise ParallelRequestError("Stewart allows at most five search queries per lore task")
+            raise ParallelRequestError(
+                "Stewart allows at most five search queries per specialist task"
+            )
 
         if self._client is None:
             raise RuntimeError("ParallelSearchClient must be used as an async context manager")
@@ -148,10 +150,10 @@ class ParallelSearchClient:
 
 
 async def parallel_search(objective: str, search_queries: list[str]) -> dict[str, object]:
-    """Discover current lore evidence through Parallel for one scoped investigation.
+    """Discover current evidence through Parallel for one scoped investigation.
 
     Args:
-        objective: A self-contained description of the lore evidence needed.
+        objective: A self-contained description of the evidence needed.
         search_queries: One to five concise, diverse web-search queries.
 
     Returns:

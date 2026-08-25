@@ -14,7 +14,7 @@ def _turn(response: str, next_step: StewartNextStep) -> RunResult:
         agent_authors=("stewart", "lore_agent"),
         tool_calls=("lore_agent", "parallel_search"),
         next_step=next_step,
-        lore_result=None,
+        specialist_results={},
     )
 
 

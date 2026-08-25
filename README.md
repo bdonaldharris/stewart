@@ -44,7 +44,7 @@ Evaluates character, team, and organization relationships affected by a proposal
 
 ### Impact Agent
 
-Evaluates broader narrative consequences, opportunities, and tradeoffs.
+Planned for a later slice; it is not implemented yet.
 
 ## Architecture Principles
 
@@ -63,24 +63,30 @@ Evaluates broader narrative consequences, opportunities, and tradeoffs.
 
 Built for the Agentic Cinema: The Blockbuster Hackathon using Gemini and Google Cloud Agent Builder.
 
-## First Vertical Slice
+## Concurrent Specialist Slice
 
 The executable slice proves this path:
 
 ```text
-Writer proposal -> Stewart Gemini supervisor -> Lore Gemini specialist
-                -> Parallel Search at runtime -> structured Lore result
-                -> Stewart synthesis -> writer response
+                   +-> Lore ---------> Parallel --+
+Writer -> Stewart -+-> Timeline -----> Parallel --+-> Stewart -> Writer
+                   +-> Relationship -> Parallel --+
 ```
 
-Stewart and Lore are separate Google ADK agents. Lore runs as Stewart's
-`single_turn` subagent, so ADK supplies the delegation tool and automatically
-returns control to Stewart. Lore stores its schema-validated result in the
-turn's ADK state, and Stewart's runtime deterministically branches on
-`COMPLETE` versus `NEEDS_INFORMATION`. Only Lore can call Parallel. Parallel
-search is asynchronous, has an explicit timeout, and closes its scoped client
-after each tool call. Retrieved excerpts exist only in the in-memory
-investigation session; this slice adds no MCU data store or persistence.
+Stewart, Lore, Timeline, and Relationship are separate Google ADK agents. The
+three specialists run as Stewart's `single_turn` subagents. Stewart selects only
+the domains relevant to a proposal and emits independent delegations together;
+ADK executes multiple tool calls concurrently and returns every result to
+Stewart for synthesis. Specialists do not communicate with one another or the
+writer.
+
+Each specialist stores a schema-validated result in ADK session state, and the
+runtime deterministically branches on the accumulated `COMPLETE` and
+`NEEDS_INFORMATION` statuses. All three specialists can call the same shared
+Parallel tool; Stewart cannot. Parallel search is asynchronous, has an explicit
+timeout, and closes its scoped client after each tool call. Retrieved excerpts
+and specialist results exist only in the in-memory investigation session. This
+slice adds no MCU data store, persistence, or Impact Agent.
 
 ### Local setup
 
@@ -96,8 +102,11 @@ Install dependencies and create local configuration:
 
 ```bash
 uv sync --extra dev
-cp .env.example .env
+cp .env.example .env.local
 ```
+
+Stewart loads `.env.local` first for local overrides, then uses `.env` only to
+fill values that are still missing. Both files are ignored by Git.
 
 For the Gemini Developer API, set:
 
@@ -127,12 +136,13 @@ Pass a proposal directly:
 uv run stewart "Introduce a cosmic archivist connected to the Nova Corps after Endgame."
 ```
 
-Or run `uv run stewart` and enter the proposal at the prompt. If Lore returns
-`NEEDS_INFORMATION`, Stewart asks the validated clarification question and the
+Or run `uv run stewart` and enter the proposal at the prompt. If any specialist
+returns `NEEDS_INFORMATION`, Stewart asks for the needed clarification and the
 CLI accepts the writer's answer in the same in-memory ADK session. Stewart can
-then re-delegate to Lore with the accumulated investigation context. This loop
-continues until Lore completes the investigation or the writer enters `exit`
-or `quit`. Nothing is retained after the process exits.
+then re-delegate to the requesting or otherwise affected specialists while
+retaining completed results. This loop continues until the investigation
+completes or the writer enters `exit` or `quit`. Nothing is retained after the
+process exits.
 
 ### Run validation
 
@@ -151,17 +161,20 @@ RUN_STEWART_INTEGRATION=1 uv run pytest -m integration -s
 ```
 
 It requires the same Gemini configuration used by the CLI plus
-`PARALLEL_API_KEY`. The test verifies trace evidence that Stewart invoked the
-separate Lore agent and Lore called `parallel_search`; it does not replace the
+`PARALLEL_API_KEY`. The test verifies trace evidence for the three separate
+specialists and accepts either valid contract status from each. Completed
+results must contain Parallel evidence; the test does not replace the
 architecture with mocks.
 
 ### Implementation map
 
 - `stewart/agent.py` — Stewart supervisor and ADK application
 - `stewart/lore_agent.py` — separate Lore Gemini subagent
-- `stewart/contracts.py` — typed Lore result and deterministic branch decision
+- `stewart/timeline_agent.py` — separate Timeline Gemini subagent
+- `stewart/relationship_agent.py` — separate Relationship Gemini subagent
+- `stewart/contracts.py` — typed specialist results and deterministic branch decisions
 - `stewart/parallel_search.py` — async official Parallel SDK integration
-- `stewart/runtime.py` — production contract handling and multi-turn ADK session
+- `stewart/runtime.py` — accumulated contract handling and multi-turn ADK session
 - `stewart/cli.py` — clarification loop over one temporary investigation
 - `tests/unit/` — production runtime, contract, Parallel, CLI, and topology tests
 - `tests/integration/` — credentialed end-to-end agent trace test

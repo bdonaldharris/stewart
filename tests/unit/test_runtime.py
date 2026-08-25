@@ -7,11 +7,18 @@ from google.adk.events import Event, EventActions
 from google.genai import types
 from pydantic import ValidationError
 
-from stewart.contracts import LORE_OUTPUT_KEY, StewartNextStep
+from stewart.contracts import (
+    LORE_OUTPUT_KEY,
+    RELATIONSHIP_OUTPUT_KEY,
+    TIMELINE_OUTPUT_KEY,
+    StewartNextStep,
+)
 from stewart.runtime import StewartConversation, run_proposal
 
 
-def _lore_payload(status: str) -> dict[str, object]:
+def _payload(
+    status: str, question: str = "What additional context should I use?"
+) -> dict[str, object]:
     needs_information = status == "NEEDS_INFORMATION"
     return {
         "status": status,
@@ -19,17 +26,15 @@ def _lore_payload(status: str) -> dict[str, object]:
         "sources": [],
         "assumptions_and_uncertainty": [],
         "additional_writer_context_required": needs_information,
-        "clarification_question": (
-            "When in the MCU does this story take place?" if needs_information else None
-        ),
+        "clarification_question": question if needs_information else None,
     }
 
 
-def _lore_event(payload: dict[str, object]) -> Event:
+def _specialist_event(author: str, output_key: str, payload: dict[str, object]) -> Event:
     return Event(
-        author="lore_agent",
-        actions=EventActions(state_delta={LORE_OUTPUT_KEY: payload}),
-        content=types.Content(role="model", parts=[types.Part(text="structured lore output")]),
+        author=author,
+        actions=EventActions(state_delta={output_key: payload}),
+        content=types.Content(role="model", parts=[types.Part(text=f"structured {author} output")]),
     )
 
 
@@ -59,16 +64,24 @@ class _FakeRunner:
             yield event
 
 
-def test_real_runtime_branches_and_reuses_session_across_clarification() -> None:
+def test_runtime_retains_multiple_results_across_same_session_clarification() -> None:
     runner = _FakeRunner(
         [
             [
-                _lore_event(_lore_payload("NEEDS_INFORMATION")),
-                _stewart_event("Could you clarify when this takes place in the MCU?"),
+                _specialist_event("lore_agent", LORE_OUTPUT_KEY, _payload("COMPLETE")),
+                _specialist_event(
+                    "timeline_agent",
+                    TIMELINE_OUTPUT_KEY,
+                    _payload("NEEDS_INFORMATION", "When in the MCU does this take place?"),
+                ),
+                _specialist_event(
+                    "relationship_agent", RELATIONSHIP_OUTPUT_KEY, _payload("COMPLETE")
+                ),
+                _stewart_event("Could you clarify when this story takes place in the MCU?"),
             ],
             [
-                _lore_event(_lore_payload("COMPLETE")),
-                _stewart_event("The clarified proposal has these lore considerations."),
+                _specialist_event("timeline_agent", TIMELINE_OUTPUT_KEY, _payload("COMPLETE")),
+                _stewart_event("The combined investigation found these considerations."),
             ],
         ]
     )
@@ -86,13 +99,17 @@ def test_real_runtime_branches_and_reuses_session_across_clarification() -> None
 
     first, second, conversation = asyncio.run(exercise())
 
-    assert first.response == "Could you clarify when this takes place in the MCU?"
+    assert first.response == "Could you clarify when this story takes place in the MCU?"
     assert first.next_step is StewartNextStep.ASK_WRITER
     assert first.needs_writer_input is True
     assert first.lore_result is not None
-    assert second.response == "The clarified proposal has these lore considerations."
+    assert first.timeline_result is not None
+    assert first.relationship_result is not None
+    assert len(first.specialist_results) == 3
+    assert second.response == "The combined investigation found these considerations."
     assert second.next_step is StewartNextStep.SYNTHESIZE
     assert second.needs_writer_input is False
+    assert len(second.specialist_results) == 3
     assert conversation.session_id == "investigation-123"
     assert len(session_service.create_calls) == 1
     assert [call["session_id"] for call in runner.calls] == [
@@ -104,26 +121,47 @@ def test_real_runtime_branches_and_reuses_session_across_clarification() -> None
     assert second_message.parts[0].text == "It takes place immediately after Endgame."
 
 
-def test_runtime_uses_lore_question_only_when_stewart_produces_no_text() -> None:
-    runner = _FakeRunner([[_lore_event(_lore_payload("NEEDS_INFORMATION"))]])
+def test_runtime_uses_specialist_questions_only_when_stewart_produces_no_text() -> None:
+    runner = _FakeRunner(
+        [
+            [
+                _specialist_event(
+                    "timeline_agent",
+                    TIMELINE_OUTPUT_KEY,
+                    _payload("NEEDS_INFORMATION", "When does this happen?"),
+                ),
+                _specialist_event(
+                    "relationship_agent",
+                    RELATIONSHIP_OUTPUT_KEY,
+                    _payload("NEEDS_INFORMATION", "Who already knows the character?"),
+                ),
+            ]
+        ]
+    )
 
     async def exercise() -> object:
         conversation = await StewartConversation.create(
             session_service=_FakeSessionService(),
             runner=runner,
         )
-        return await conversation.send("A cosmic character appears after a major event.")
+        return await conversation.send("An underspecified proposal")
 
     result = asyncio.run(exercise())
 
-    assert result.response == "When in the MCU does this story take place?"
+    assert result.response == (
+        "I need a little more context:\n"
+        "- Timeline: When does this happen?\n"
+        "- Relationship: Who already knows the character?"
+    )
     assert result.next_step is StewartNextStep.ASK_WRITER
 
 
-def test_runtime_rejects_invalid_validated_lore_state() -> None:
-    invalid_payload = _lore_payload("NEEDS_INFORMATION")
+def test_runtime_rejects_invalid_validated_specialist_state() -> None:
+    invalid_payload = _payload("NEEDS_INFORMATION")
     invalid_payload["clarification_question"] = None
-    runner = _FakeRunner([[_lore_event(invalid_payload)]])
+    runner = _FakeRunner(
+        [[_specialist_event("timeline_agent", TIMELINE_OUTPUT_KEY, invalid_payload)]]
+    )
 
     async def exercise() -> None:
         conversation = await StewartConversation.create(
