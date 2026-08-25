@@ -102,8 +102,11 @@ Install dependencies and create local configuration:
 
 ```bash
 uv sync --extra dev
-cp .env.example .env
+cp .env.example .env.local
 ```
+
+Stewart loads `.env.local` first for local overrides, then uses `.env` only to
+fill values that are still missing. Both files are ignored by Git.
 
 For the Gemini Developer API, set:
 

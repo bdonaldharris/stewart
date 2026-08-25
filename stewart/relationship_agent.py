@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import os
 
-from dotenv import load_dotenv
 from google.adk import Agent
 
+from stewart.config import load_environment
 from stewart.contracts import RELATIONSHIP_OUTPUT_KEY, RelationshipResult
 from stewart.parallel_search import parallel_search
 
-load_dotenv()
+load_environment()
 
 MODEL = os.getenv("STEWART_MODEL", "gemini-flash-latest")
 
