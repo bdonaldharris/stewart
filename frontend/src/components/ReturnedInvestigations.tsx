@@ -35,10 +35,7 @@ export function ReturnedInvestigations({ results, impact }: ReturnedInvestigatio
   if (artifacts.length === 0) return null;
 
   return (
-    <section className="returned-investigations" aria-label="Evidence received">
-      <div className="returned-heading">
-        <p className="eyebrow">Evidence received</p>
-      </div>
+    <div className="returned-investigations">
       <div className="returned-row">
         {artifacts.map((artifact) => (
           <button
@@ -57,6 +54,6 @@ export function ReturnedInvestigations({ results, impact }: ReturnedInvestigatio
       {selected && (
         <InvestigationModal key={selected.agent} artifact={selected} onClose={closeModal} />
       )}
-    </section>
+    </div>
   );
 }

@@ -32,7 +32,7 @@ describe("Writer's Room", () => {
     expect(screen.getByTestId("agent-card-timeline")).toBeInTheDocument();
     expect(screen.getByTestId("agent-card-relationship")).toBeInTheDocument();
     expect(screen.getByTestId("agent-card-impact")).toHaveAttribute("data-status", "waiting");
-    expect(screen.getByText("Evidence received")).toBeInTheDocument();
+    expect(screen.queryByText("Evidence received")).not.toBeInTheDocument();
     expect(screen.queryByText("3 sources · 2 findings")).not.toBeInTheDocument();
     expect(screen.queryByText("Complete")).not.toBeInTheDocument();
     expect(screen.queryByText("View investigation →")).not.toBeInTheDocument();
