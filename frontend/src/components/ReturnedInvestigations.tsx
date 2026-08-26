@@ -22,13 +22,6 @@ interface ReturnedInvestigationsProps {
   impact?: ImpactAnalysis;
 }
 
-function artifactMetadata(artifact: InvestigationArtifact): string {
-  if (artifact.kind === "discovery") {
-    return `${artifact.result.sources.length} sources · ${artifact.result.findings.length} findings`;
-  }
-  return `${artifact.result.affectedAreas.length} affected areas · ${artifact.result.tradeoffs.length} tradeoffs`;
-}
-
 export function ReturnedInvestigations({ results, impact }: ReturnedInvestigationsProps) {
   const [selected, setSelected] = useState<InvestigationArtifact>();
   const closeModal = useCallback(() => setSelected(undefined), []);
@@ -42,13 +35,9 @@ export function ReturnedInvestigations({ results, impact }: ReturnedInvestigatio
   if (artifacts.length === 0) return null;
 
   return (
-    <section className="returned-investigations" aria-label="Returned Investigations">
+    <section className="returned-investigations" aria-label="Evidence received">
       <div className="returned-heading">
-        <div>
-          <p className="eyebrow">Evidence received</p>
-          <h2>Returned Investigations</h2>
-        </div>
-        <span>{artifacts.length} returned</span>
+        <p className="eyebrow">Evidence received</p>
       </div>
       <div className="returned-row">
         {artifacts.map((artifact) => (
@@ -58,13 +47,10 @@ export function ReturnedInvestigations({ results, impact }: ReturnedInvestigatio
             className="returned-card"
             onClick={() => setSelected(artifact)}
             aria-haspopup="dialog"
+            aria-label={`${investigationNames[artifact.agent]} View`}
           >
-            <span className="returned-card-topline">
-              <strong>{investigationNames[artifact.agent]}</strong>
-              <span className="complete-badge">Complete</span>
-            </span>
-            <span className="returned-card-meta">{artifactMetadata(artifact)}</span>
-            <span className="returned-card-action">View investigation →</span>
+            <span className="returned-card-title">{investigationNames[artifact.agent]}</span>
+            <span className="returned-card-view">View</span>
           </button>
         ))}
       </div>

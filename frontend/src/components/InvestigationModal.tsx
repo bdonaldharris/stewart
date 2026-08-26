@@ -17,6 +17,13 @@ const investigationNames = {
   impact: "Impact Investigation",
 };
 
+function artifactMetadata(artifact: InvestigationArtifact): string {
+  if (artifact.kind === "discovery") {
+    return `${artifact.result.sources.length} sources · ${artifact.result.findings.length} findings`;
+  }
+  return `${artifact.result.affectedAreas.length} affected areas · ${artifact.result.tradeoffs.length} tradeoffs`;
+}
+
 function DetailList({ items }: { items: string[] }) {
   return (
     <ul className="modal-detail-list">
@@ -203,6 +210,7 @@ export function InvestigationModal({ artifact, onClose }: InvestigationModalProp
           <div>
             <p className="eyebrow">Returned to Stewart</p>
             <h2 id={titleId}>{title}</h2>
+            <p className="modal-metadata">{artifactMetadata(artifact)}</p>
           </div>
           <button ref={closeRef} type="button" className="modal-close" onClick={onClose}>
             <span aria-hidden="true">×</span>

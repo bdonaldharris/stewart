@@ -59,26 +59,17 @@ export function PromptComposer({ onSubmit, disabled = false, initial = false }: 
 
 interface ConversationPanelProps {
   messages: ConversationMessage[];
-  needsWriterInput: boolean;
   onSubmit: (message: string) => Promise<void>;
   busy?: boolean;
 }
 
 export function ConversationPanel({
   messages,
-  needsWriterInput,
   onSubmit,
   busy = false,
 }: ConversationPanelProps) {
   return (
     <section className="conversation-panel panel" aria-label="Stewart conversation">
-      <div className="panel-heading">
-        <div>
-          <p className="eyebrow">Conversation</p>
-          <h2>Writer & Stewart</h2>
-        </div>
-        {needsWriterInput && <span className="attention-pill">Writer input needed</span>}
-      </div>
       <div className="conversation-scroll">
         {messages.map((message) => (
           <article

@@ -23,27 +23,34 @@ describe("Writer's Room", () => {
       "active",
     );
     expect(screen.getByTestId("agent-card-impact")).toHaveAttribute("data-status", "waiting");
-    expect(
-      screen.queryByRole("heading", { name: "Returned Investigations" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Evidence received")).not.toBeInTheDocument();
+    expect(screen.queryByText("Writer & Stewart")).not.toBeInTheDocument();
+    expect(screen.queryByText("Conversation")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /advance fixture/i }));
     expect(screen.queryByTestId("agent-card-lore")).not.toBeInTheDocument();
     expect(screen.getByTestId("agent-card-timeline")).toBeInTheDocument();
     expect(screen.getByTestId("agent-card-relationship")).toBeInTheDocument();
     expect(screen.getByTestId("agent-card-impact")).toHaveAttribute("data-status", "waiting");
-    expect(screen.getByRole("heading", { name: "Returned Investigations" })).toBeInTheDocument();
-    expect(screen.getByText("3 sources · 2 findings")).toBeInTheDocument();
+    expect(screen.getByText("Evidence received")).toBeInTheDocument();
+    expect(screen.queryByText("3 sources · 2 findings")).not.toBeInTheDocument();
+    expect(screen.queryByText("Complete")).not.toBeInTheDocument();
+    expect(screen.queryByText("View investigation →")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /Timeline Investigation/ }),
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Lore Investigation/ }));
+    const loreTrigger = screen.getByRole("button", { name: /Lore Investigation/ });
+    await user.click(loreTrigger);
     expect(screen.getByRole("dialog", { name: "Lore Investigation" })).toBeInTheDocument();
+    expect(screen.getByText("3 sources · 2 findings")).toBeVisible();
     expect(screen.getByText("The new story rule needs a clear boundary")).toBeVisible();
     expect(screen.getByText("Fixture canon evidence packet")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Close investigation" }));
+    const closeButton = screen.getByRole("button", { name: "Close investigation" });
+    expect(closeButton).toHaveFocus();
+    await user.click(closeButton);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(loreTrigger).toHaveFocus();
 
     await user.click(screen.getByRole("button", { name: /advance fixture/i }));
     expect(screen.queryByTestId("agent-card-timeline")).not.toBeInTheDocument();
@@ -57,25 +64,42 @@ describe("Writer's Room", () => {
     expect(screen.queryByRole("heading", { name: "Specialist Workspace" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("agent-card-impact")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Impact Investigation/ })).toBeInTheDocument();
+    expect(screen.queryByText("4 affected areas · 2 tradeoffs")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Stewardship Report" })).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Stewart is preparing the Stewardship Report." }),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Impact Investigation/ }));
+    const impactTrigger = screen.getByRole("button", { name: /Impact Investigation/ });
+    await user.click(impactTrigger);
     expect(screen.getByRole("dialog", { name: "Impact Investigation" })).toBeInTheDocument();
+    expect(screen.getByText("4 affected areas · 2 tradeoffs")).toBeVisible();
     expect(screen.getByText("Subsequent projects inherit the mechanic's limits.")).toBeVisible();
     expect(screen.getByText("Introduce as a contained supporting role")).toBeVisible();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(impactTrigger).toHaveFocus();
 
     await user.click(screen.getByRole("button", { name: /advance fixture/i }));
     expect(screen.getByRole("heading", { name: "Stewardship Report" })).toBeInTheDocument();
+    expect(screen.queryByText("Investigation complete")).not.toBeInTheDocument();
     expect(screen.getByText("Stewart's Assessment")).toBeInTheDocument();
     expect(screen.getByText("Audience Considerations")).toBeInTheDocument();
     expect(screen.getByText("Options & Tradeoffs")).toBeInTheDocument();
     expect(screen.getByText("Introduce as a contained supporting role")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Investigation/ })).toHaveLength(4);
+    expect(screen.queryByText("4 returned")).not.toBeInTheDocument();
+
+    for (const name of [
+      "Lore Investigation",
+      "Timeline Investigation",
+      "Relationship Investigation",
+      "Impact Investigation",
+    ]) {
+      await user.click(screen.getByRole("button", { name: `${name} View` }));
+      expect(screen.getByRole("dialog", { name })).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Close investigation" }));
+    }
   });
 
   it("keeps clarification inside the conversation before revealing specialists", async () => {

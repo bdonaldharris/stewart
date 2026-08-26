@@ -131,7 +131,6 @@ export function App({ eventSource }: AppProps) {
               <aside className="conversation-column">
                 <ConversationPanel
                   messages={state.messages}
-                  needsWriterInput={state.needsWriterInput}
                   onSubmit={sendMessage}
                   busy={busy}
                 />

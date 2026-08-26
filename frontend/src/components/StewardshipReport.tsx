@@ -24,7 +24,6 @@ export function StewardshipReport({ report, impact, fixtureMode }: StewardshipRe
     <article className="report-panel" aria-label="Stewardship Report">
       <header className="report-header">
         <div>
-          <p className="eyebrow report-kicker">Investigation complete</p>
           <h1>
             Stewardship Report
           </h1>
