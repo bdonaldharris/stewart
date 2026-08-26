@@ -96,33 +96,21 @@ export function App({ eventSource }: AppProps) {
               </label>
             )}
           </div>
-          {fixtureMode && (
-            <div className="fixture-notice entry-fixture-notice">
-              Development fixture · representative transitions · not live agent output
-            </div>
-          )}
         </main>
       ) : (
         <main className="workspace-main">
-          {fixtureMode && (
-            <div className="fixture-bar">
-              <div>
-                <p className="fixture-title">Development fixture</p>
-                <p className="fixture-copy">
-                  Representative event data using the intended backend contract—not live discovery.
-                </p>
-              </div>
-              {source.canAdvance && (
-                <button
-                  type="button"
-                  onClick={advanceFixture}
-                  disabled={busy}
-                  className="fixture-advance"
-                >
-                  Advance fixture
-                  <span aria-hidden="true">→</span>
-                </button>
-              )}
+          {fixtureMode && source.canAdvance && (
+            <div className="fixture-controls">
+              <button
+                type="button"
+                onClick={advanceFixture}
+                disabled={busy}
+                className="fixture-advance"
+                aria-label="Continue investigation"
+              >
+                Continue
+                <span aria-hidden="true">→</span>
+              </button>
             </div>
           )}
 
@@ -160,7 +148,6 @@ export function App({ eventSource }: AppProps) {
                       <StewardshipReport
                         report={state.report}
                         impact={state.impact}
-                        fixtureMode={fixtureMode}
                       />
                     ) : !specialistsInWorkspace ? (
                       <section className="synthesis-panel panel" aria-label="Stewart synthesis">

@@ -3,7 +3,6 @@ import type { ImpactAnalysis, StewardshipReportData } from "../model/events";
 interface StewardshipReportProps {
   report: StewardshipReportData;
   impact?: ImpactAnalysis;
-  fixtureMode: boolean;
 }
 
 function ReportList({ items }: { items: string[] }) {
@@ -19,7 +18,7 @@ function ReportList({ items }: { items: string[] }) {
   );
 }
 
-export function StewardshipReport({ report, impact, fixtureMode }: StewardshipReportProps) {
+export function StewardshipReport({ report, impact }: StewardshipReportProps) {
   return (
     <article className="report-panel" aria-label="Stewardship Report">
       <header className="report-header">
@@ -32,12 +31,6 @@ export function StewardshipReport({ report, impact, fixtureMode }: StewardshipRe
           S
         </div>
       </header>
-
-      {fixtureMode && (
-        <div className="fixture-notice report-fixture-notice">
-          Development fixture · representative structured data · not live backend output
-        </div>
-      )}
 
       <section className="report-assessment">
         <p className="eyebrow">Stewart&apos;s Assessment</p>

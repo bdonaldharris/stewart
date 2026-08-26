@@ -14,7 +14,7 @@ class UnavailableBackendEventSource implements WriterRoomEventSource {
 
   async sendMessage(): Promise<WriterRoomEventBatch> {
     throw new Error(
-      "The live browser adapter is not configured yet. Enable the development fixture or connect the Stewart event transport.",
+      "The live browser adapter is not configured. Connect the Stewart event transport.",
     );
   }
 

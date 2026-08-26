@@ -5,6 +5,17 @@ import { App } from "./App";
 import { createDemoFixture } from "./fixtures/demoFixture";
 
 describe("Writer's Room", () => {
+  it("focuses the writer input when the application starts", () => {
+    render(<App eventSource={createDemoFixture()} />);
+
+    expect(
+      screen.getByPlaceholderText("Describe the story idea you want Stewart to investigate…"),
+    ).toHaveFocus();
+    expect(
+      screen.queryByText(/development fixture|not live|representative/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("moves completed specialists into returned investigations before the report", async () => {
     const user = userEvent.setup();
     render(<App eventSource={createDemoFixture()} />);
@@ -27,7 +38,7 @@ describe("Writer's Room", () => {
     expect(screen.queryByText("Writer & Stewart")).not.toBeInTheDocument();
     expect(screen.queryByText("Conversation")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /advance fixture/i }));
+    await user.click(screen.getByRole("button", { name: "Continue investigation" }));
     expect(screen.queryByTestId("agent-card-lore")).not.toBeInTheDocument();
     expect(screen.getByTestId("agent-card-timeline")).toBeInTheDocument();
     expect(screen.getByTestId("agent-card-relationship")).toBeInTheDocument();
@@ -45,22 +56,22 @@ describe("Writer's Room", () => {
     expect(screen.getByRole("dialog", { name: "Lore Investigation" })).toBeInTheDocument();
     expect(screen.getByText("3 sources · 2 findings")).toBeVisible();
     expect(screen.getByText("The new story rule needs a clear boundary")).toBeVisible();
-    expect(screen.getByText("Fixture canon evidence packet")).toBeVisible();
+    expect(screen.getByText("Canon evidence packet")).toBeVisible();
     const closeButton = screen.getByRole("button", { name: "Close investigation" });
     expect(closeButton).toHaveFocus();
     await user.click(closeButton);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(loreTrigger).toHaveFocus();
 
-    await user.click(screen.getByRole("button", { name: /advance fixture/i }));
+    await user.click(screen.getByRole("button", { name: "Continue investigation" }));
     expect(screen.queryByTestId("agent-card-timeline")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Timeline Investigation/ })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /advance fixture/i }));
+    await user.click(screen.getByRole("button", { name: "Continue investigation" }));
     expect(screen.queryByTestId("agent-card-relationship")).not.toBeInTheDocument();
     expect(screen.getByTestId("agent-card-impact")).toHaveAttribute("data-status", "active");
 
-    await user.click(screen.getByRole("button", { name: /advance fixture/i }));
+    await user.click(screen.getByRole("button", { name: "Continue investigation" }));
     expect(screen.queryByRole("heading", { name: "Specialist Workspace" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("agent-card-impact")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Impact Investigation/ })).toBeInTheDocument();
@@ -80,7 +91,7 @@ describe("Writer's Room", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(impactTrigger).toHaveFocus();
 
-    await user.click(screen.getByRole("button", { name: /advance fixture/i }));
+    await user.click(screen.getByRole("button", { name: "Continue investigation" }));
     expect(screen.getByRole("heading", { name: "Stewardship Report" })).toBeInTheDocument();
     expect(screen.queryByText("Investigation complete")).not.toBeInTheDocument();
     expect(screen.getByText("Stewart's Assessment")).toBeInTheDocument();
@@ -89,6 +100,9 @@ describe("Writer's Room", () => {
     expect(screen.getByText("Introduce as a contained supporting role")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Investigation/ })).toHaveLength(4);
     expect(screen.queryByText("4 returned")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/development fixture|not live|representative/i),
+    ).not.toBeInTheDocument();
 
     for (const name of [
       "Lore Investigation",
