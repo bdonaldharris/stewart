@@ -24,8 +24,8 @@ export function StewardshipReport({ report, impact, fixtureMode }: StewardshipRe
     <article className="report-panel" aria-label="Stewardship Report">
       <header className="report-header">
         <div>
-          <p className="eyebrow text-[#d4b47b]">Investigation complete</p>
-          <h1 className="mt-3 text-3xl font-medium tracking-[-0.025em] text-white sm:text-4xl">
+          <p className="eyebrow report-kicker">Investigation complete</p>
+          <h1>
             Stewardship Report
           </h1>
         </div>
@@ -35,14 +35,14 @@ export function StewardshipReport({ report, impact, fixtureMode }: StewardshipRe
       </header>
 
       {fixtureMode && (
-        <div className="fixture-notice mt-6">
+        <div className="fixture-notice report-fixture-notice">
           Development fixture · representative structured data · not live backend output
         </div>
       )}
 
       <section className="report-assessment">
         <p className="eyebrow">Stewart&apos;s Assessment</p>
-        <p className="mt-4 max-w-4xl text-lg leading-8 text-slate-200 sm:text-xl">
+        <p className="assessment-copy">
           {report.assessment}
         </p>
       </section>
@@ -66,32 +66,32 @@ export function StewardshipReport({ report, impact, fixtureMode }: StewardshipRe
         </section>
       </div>
 
-      <section className="mt-8 border-t border-white/8 pt-8">
+      <section className="report-options">
         <p className="eyebrow">Options & Tradeoffs</p>
         <div className="mt-5 grid gap-4 lg:grid-cols-2">
           {report.options.map((option, index) => (
             <article key={option.title} className="option-card">
               <div className="flex items-center gap-3">
                 <span className="option-number">0{index + 1}</span>
-                <h3 className="text-base font-medium text-slate-100">{option.title}</h3>
+                <h3>{option.title}</h3>
               </div>
-              <p className="mt-4 text-sm leading-6 text-slate-400">{option.description}</p>
-              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <p className="option-description">{option.description}</p>
+              <div className="option-columns">
                 <div>
-                  <p className="text-[0.66rem] font-semibold tracking-[0.16em] text-emerald-200/70 uppercase">
+                  <p className="modal-label">
                     Benefits
                   </p>
-                  <ul className="mt-2 space-y-2 text-xs leading-5 text-slate-400">
+                  <ul className="option-list">
                     {option.benefits.map((benefit) => (
                       <li key={benefit}>+ {benefit}</li>
                     ))}
                   </ul>
                 </div>
                 <div>
-                  <p className="text-[0.66rem] font-semibold tracking-[0.16em] text-amber-200/70 uppercase">
+                  <p className="modal-label">
                     Tradeoffs
                   </p>
-                  <ul className="mt-2 space-y-2 text-xs leading-5 text-slate-400">
+                  <ul className="option-list">
                     {option.tradeoffs.map((tradeoff) => (
                       <li key={tradeoff}>— {tradeoff}</li>
                     ))}

@@ -180,7 +180,7 @@ class DemoFixtureEventSource implements WriterRoomEventSource {
   }
 
   get canAdvance(): boolean {
-    return this.started && this.sequenceIndex < 4;
+    return this.started && this.sequenceIndex < 5;
   }
 
   async sendMessage(message: string): Promise<WriterRoomEventBatch> {
@@ -293,6 +293,8 @@ class DemoFixtureEventSource implements WriterRoomEventSource {
       ],
       [
         { type: "impact_completed", result: impactAnalysis },
+      ],
+      [
         { type: "report_ready", report: stewardshipReport },
         {
           type: "stewart_message",

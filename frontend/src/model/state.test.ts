@@ -31,6 +31,12 @@ describe("Writer's Room event reducer", () => {
     state = reduceWriterRoomEvents(state, await source.advance());
 
     expect(state.agents.impact.status).toBe("complete");
+    expect(state.phase).toBe("investigation");
+    expect(state.impact?.risks).not.toHaveLength(0);
+    expect(state.report).toBeUndefined();
+
+    state = reduceWriterRoomEvents(state, await source.advance());
+
     expect(state.phase).toBe("report");
     expect(state.report?.assessment).toContain("recurring role");
   });
