@@ -13,6 +13,7 @@
   --teal-solid: #0a4f47;
   --teal-fill: #e4f1ec;
   --teal-border: #a9d2c6;
+  --evidence-surface: #b6ddcb;
   --neutral-fill: #ecebe6;
   --neutral-text: #5d6a63;
   --neutral-border-dashed: #d9e2dc;
@@ -248,21 +249,6 @@ button:disabled {
   accent-color: var(--teal-solid);
 }
 
-.fixture-notice {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 0.45rem 0.75rem;
-  color: var(--teal-solid);
-  font-size: 0.68rem;
-  letter-spacing: 0.04em;
-  background: var(--teal-fill);
-}
-
-.entry-fixture-notice {
-  margin-top: 1.5rem;
-}
-
 .workspace-main {
   display: flex;
   width: 100%;
@@ -272,30 +258,11 @@ button:disabled {
   flex-direction: column;
 }
 
-.fixture-bar {
+.fixture-controls {
   display: flex;
   flex: none;
-  min-height: 3.6rem;
-  margin-bottom: 0.85rem;
-  border: 0.5px solid var(--border);
-  border-radius: 0.75rem;
-  padding: 0.65rem 0.8rem;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  background: var(--bg-surface);
-}
-
-.fixture-title {
-  color: var(--teal-solid);
-  font-size: 0.75rem;
-  font-weight: 500;
-}
-
-.fixture-copy {
-  margin: 0.18rem 0 0;
-  color: var(--text-secondary);
-  font-size: 0.66rem;
+  margin-bottom: 0.55rem;
+  justify-content: flex-end;
 }
 
 .fixture-advance {
@@ -619,7 +586,9 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  border-color: var(--teal-border);
   text-align: left;
+  background: var(--evidence-surface);
 }
 
 .returned-card:hover,
@@ -730,10 +699,6 @@ button:disabled {
   color: var(--text-on-teal);
   font-family: Georgia, serif;
   background: var(--teal-solid);
-}
-
-.report-fixture-notice {
-  margin-top: 1rem;
 }
 
 .report-assessment {
@@ -1138,11 +1103,6 @@ button:disabled {
   .workspace-main {
     padding-right: 1rem;
     padding-left: 1rem;
-  }
-
-  .fixture-bar {
-    align-items: flex-start;
-    flex-direction: column;
   }
 
   .specialist-grid,

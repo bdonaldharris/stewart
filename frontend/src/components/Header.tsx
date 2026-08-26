@@ -16,10 +16,12 @@ export function Header({ fixtureMode }: HeaderProps) {
           </p>
         </div>
       </div>
-      <div className="environment-label">
-        <span />
-        {fixtureMode ? "Development fixture" : "Backend adapter"}
-      </div>
+      {!fixtureMode && (
+        <div className="environment-label">
+          <span />
+          Backend adapter
+        </div>
+      )}
     </header>
   );
 }

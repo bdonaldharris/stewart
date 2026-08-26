@@ -36,6 +36,7 @@ export function PromptComposer({ onSubmit, disabled = false, initial = false }: 
         }}
         rows={initial ? 4 : 3}
         disabled={disabled}
+        autoFocus={initial}
         placeholder="Describe the story idea you want Stewart to investigate…"
         className="composer-input"
       />

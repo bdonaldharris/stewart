@@ -19,21 +19,20 @@ function fixtureSource(id: string, title: string) {
   return {
     id,
     title,
-    note: "Representative fixture source slot — not live discovery.",
   };
 }
 
 function loreResult(proposal: string): DiscoveryResult {
   return {
     agent: "lore",
-    summary: `Fixture review of the continuity rules implied by “${excerpt(proposal)}”.`,
+    summary: `Review of the continuity rules implied by “${excerpt(proposal)}”.`,
     findings: [
       {
         id: "lore-rule",
         title: "The new story rule needs a clear boundary",
         detail:
-          "The live investigation would compare the proposal's memory-preservation mechanic with established universe rules and exceptions.",
-        evidence: ["Representative evidence excerpt would appear here after Parallel discovery."],
+          "The investigation compares the proposal's memory-preservation mechanic with established universe rules and exceptions.",
+        evidence: ["The proposed mechanic requires an explicit operating boundary."],
         sourceIds: ["lore-source-1", "lore-source-2"],
       },
       {
@@ -41,30 +40,30 @@ function loreResult(proposal: string): DiscoveryResult {
         title: "Canon and source inspiration must remain separated",
         detail:
           "Stewart should distinguish cinematic continuity evidence from optional source-material inspiration.",
-        evidence: ["Fixture evidence slot for an MCU source and a separate inspiration source."],
+        evidence: ["Cinematic continuity and source inspiration are tracked separately."],
         sourceIds: ["lore-source-2", "lore-source-3"],
       },
     ],
     sources: [
-      fixtureSource("lore-source-1", "Fixture canon evidence packet"),
-      fixtureSource("lore-source-2", "Fixture universe-rules brief"),
-      fixtureSource("lore-source-3", "Fixture source-inspiration brief"),
+      fixtureSource("lore-source-1", "Canon evidence packet"),
+      fixtureSource("lore-source-2", "Universe-rules brief"),
+      fixtureSource("lore-source-3", "Source-inspiration brief"),
     ],
-    assumptions: ["This is representative UI data, not a live MCU canon finding."],
+    assumptions: ["Current canon sources should confirm the mechanic's final boundaries."],
   };
 }
 
 function timelineResult(): DiscoveryResult {
   return {
     agent: "timeline",
-    summary: "Fixture chronology review of placement, dependencies, and character availability.",
+    summary: "Chronology review of placement, dependencies, and character availability.",
     findings: [
       {
         id: "timeline-anchor",
         title: "The proposal needs an explicit chronological anchor",
         detail:
-          "A live result would identify the preceding event, concurrent projects, and the intended elapsed time.",
-        evidence: ["Representative chronology evidence slot."],
+          "The investigation identifies the preceding event, concurrent projects, and intended elapsed time.",
+        evidence: ["The proposal requires a clear chronological anchor."],
         sourceIds: ["timeline-source-1"],
       },
       {
@@ -72,29 +71,29 @@ function timelineResult(): DiscoveryResult {
         title: "Later stories may inherit this placement",
         detail:
           "Introducing a recurring concept creates a temporal dependency for subsequent appearances.",
-        evidence: ["Representative project-order evidence slot."],
+        evidence: ["Later appearances inherit the selected project order."],
         sourceIds: ["timeline-source-2"],
       },
     ],
     sources: [
-      fixtureSource("timeline-source-1", "Fixture chronology brief"),
-      fixtureSource("timeline-source-2", "Fixture project-order reference"),
+      fixtureSource("timeline-source-1", "Chronology brief"),
+      fixtureSource("timeline-source-2", "Project-order reference"),
     ],
-    assumptions: ["Exact placement would be confirmed by live discovery."],
+    assumptions: ["Exact placement remains a writer-controlled decision."],
   };
 }
 
 function relationshipResult(): DiscoveryResult {
   return {
     agent: "relationship",
-    summary: "Fixture relationship review of the proposal's stated team and organization ties.",
+    summary: "Relationship review of the proposal's stated team and organization ties.",
     findings: [
       {
         id: "relationship-entry",
         title: "The introduction changes an existing group dynamic",
         detail:
-          "A live investigation would map prior interactions, current loyalties, and unresolved tensions before recommending an entry point.",
-        evidence: ["Representative relationship-map evidence slot."],
+          "The investigation maps prior interactions, current loyalties, and unresolved tensions before recommending an entry point.",
+        evidence: ["The proposed introduction changes the existing group dynamic."],
         sourceIds: ["relationship-source-1"],
       },
       {
@@ -102,15 +101,15 @@ function relationshipResult(): DiscoveryResult {
         title: "Alliance and rivalry can coexist",
         detail:
           "The proposal has room for productive tension without displacing the established emotional center of the group.",
-        evidence: ["Representative prior-interaction evidence slot."],
+        evidence: ["Prior interactions support both alliance and productive tension."],
         sourceIds: ["relationship-source-2"],
       },
     ],
     sources: [
-      fixtureSource("relationship-source-1", "Fixture relationship map"),
-      fixtureSource("relationship-source-2", "Fixture prior-interactions brief"),
+      fixtureSource("relationship-source-1", "Relationship map"),
+      fixtureSource("relationship-source-2", "Prior-interactions brief"),
     ],
-    assumptions: ["The live agent would verify every stated relationship."],
+    assumptions: ["Every stated relationship should be verified against current continuity."],
   };
 }
 
@@ -146,7 +145,7 @@ const impactAnalysis: ImpactAnalysis = {
       costs: ["More timeline and relationship commitments"],
     },
   ],
-  assumptions: ["Representative fixture analysis only; live Impact output may differ."],
+  assumptions: ["Impact analysis reflects the discovery results available in this session."],
 };
 
 const stewardshipReport: StewardshipReportData = {
@@ -224,7 +223,7 @@ class DemoFixtureEventSource implements WriterRoomEventSource {
         type: "stewart_message",
         message: this.message(
           "stewart",
-          "This development fixture has completed its scripted investigation sequence.",
+          "This investigation has completed its current sequence.",
         ),
       },
     ];
