@@ -14,9 +14,9 @@ from stewart.contracts import (
     TIMELINE_OUTPUT_KEY,
 )
 from stewart.impact_agent import build_impact_instruction, impact_agent
-from stewart.lore_agent import lore_agent
-from stewart.relationship_agent import relationship_agent
-from stewart.timeline_agent import timeline_agent
+from stewart.lore_agent import LORE_INSTRUCTION, lore_agent
+from stewart.relationship_agent import RELATIONSHIP_INSTRUCTION, relationship_agent
+from stewart.timeline_agent import TIMELINE_INSTRUCTION, timeline_agent
 
 DISCOVERY_AGENTS = [lore_agent, timeline_agent, relationship_agent]
 
@@ -77,6 +77,20 @@ def test_stewart_requires_impact_after_discovery_fan_in() -> None:
     assert "call `impact_agent` by" in STEWART_INSTRUCTION
     assert "itself in the next model turn" in STEWART_INSTRUCTION
     assert "Never call `impact_agent` in the same model response" in STEWART_INSTRUCTION
+
+
+def test_agents_request_plain_display_text_for_browser_contracts() -> None:
+    assert "plain display text" in STEWART_INSTRUCTION
+    assert "plain display text" in LORE_INSTRUCTION
+    assert "plain display text" in TIMELINE_INSTRUCTION
+    assert "plain display text" in RELATIONSHIP_INSTRUCTION
+
+    class _EmptyContext:
+        state = {}
+
+    impact_instruction = build_impact_instruction(cast(Any, _EmptyContext()))
+    assert "plain display text" in impact_instruction
+    assert "one concise" in impact_instruction
 
 
 def test_adk_executes_discovery_delegations_concurrently_without_impact(monkeypatch) -> None:

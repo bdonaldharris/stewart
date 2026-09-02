@@ -67,7 +67,9 @@ export function StewardshipReport({ report, impact }: StewardshipReportProps) {
                 <span className="option-number">0{index + 1}</span>
                 <h3>{option.title}</h3>
               </div>
-              <p className="option-description">{option.description}</p>
+              {option.description && (
+                <p className="option-description">{option.description}</p>
+              )}
               <div className="option-columns">
                 <div>
                   <p className="modal-label">

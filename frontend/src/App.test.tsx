@@ -2,7 +2,9 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { App } from "./App";
+import { StewardshipReport } from "./components/StewardshipReport";
 import { createDemoFixture } from "./fixtures/demoFixture";
+import type { WriterRoomEventSource } from "./services/eventSource";
 
 describe("Writer's Room", () => {
   it("focuses the writer input when the application starts", () => {
@@ -98,6 +100,11 @@ describe("Writer's Room", () => {
     expect(screen.getByText("Audience Considerations")).toBeInTheDocument();
     expect(screen.getByText("Options & Tradeoffs")).toBeInTheDocument();
     expect(screen.getByText("Introduce as a contained supporting role")).toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        "A viable creative path with a different balance of narrative reach and continuity load.",
+      ),
+    ).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: /Investigation/ })).toHaveLength(4);
     expect(screen.queryByText("4 returned")).not.toBeInTheDocument();
     expect(
@@ -142,5 +149,69 @@ describe("Writer's Room", () => {
     expect(screen.getByTestId("agent-card-impact")).toHaveTextContent(
       "Waiting for specialist findings",
     );
+  });
+
+  it("renders live backend events as they stream", async () => {
+    const source: WriterRoomEventSource = {
+      mode: "backend",
+      canAdvance: false,
+      async sendMessage(message, onEvents) {
+        const events = [
+          {
+            type: "writer_message" as const,
+            message: { id: "writer-live", speaker: "writer" as const, text: message },
+          },
+          { type: "investigation_started" as const },
+          {
+            type: "specialist_status" as const,
+            agent: "lore" as const,
+            status: "active" as const,
+            activity: "Searching sources with Parallel",
+          },
+        ];
+        events.forEach((event) => onEvents?.([event]));
+        return events;
+      },
+      async advance() {
+        return [];
+      },
+    };
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await user.type(
+      screen.getByPlaceholderText("Describe the story idea you want Stewart to investigate…"),
+      "A live proposal",
+    );
+    await user.click(screen.getByRole("button", { name: "Send proposal to Stewart" }));
+
+    expect(screen.getByText("A live proposal")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-card-lore")).toHaveTextContent(
+      "Searching sources with Parallel",
+    );
+    expect(screen.queryByRole("button", { name: "Continue investigation" })).not.toBeInTheDocument();
+  });
+
+  it("omits an option description when the live contract has no distinct description", () => {
+    const { container } = render(
+      <StewardshipReport
+        report={{
+          assessment: "A concise assessment.",
+          continuityConsiderations: [],
+          opportunities: [],
+          audienceConsiderations: [],
+          options: [
+            {
+              title: "Use a supporting role",
+              benefits: ["Lower continuity load"],
+              tradeoffs: ["Less immediate narrative reach"],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(container.querySelector(".option-description")).toBeNull();
+    expect(screen.getByText("Use a supporting role")).toBeInTheDocument();
   });
 });

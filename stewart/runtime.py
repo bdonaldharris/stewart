@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import uuid4
@@ -35,6 +35,8 @@ SPECIALIST_OUTPUT_KEYS = (
     RELATIONSHIP_OUTPUT_KEY,
     IMPACT_OUTPUT_KEY,
 )
+
+RuntimeEventObserver = Callable[[Event], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -133,7 +135,12 @@ class StewartConversation:
             session_id=resolved_session_id,
         )
 
-    async def send(self, writer_message: str) -> RunResult:
+    async def send(
+        self,
+        writer_message: str,
+        *,
+        on_event: RuntimeEventObserver | None = None,
+    ) -> RunResult:
         """Run one writer turn in this conversation's existing ADK session."""
         if not writer_message.strip():
             raise ValueError("A non-empty writer message is required")
@@ -167,6 +174,9 @@ class StewartConversation:
                 event_text = _text_from_event(event)
                 if event_text:
                     final_response = event_text
+
+            if on_event is not None:
+                await on_event(event)
 
         next_step = _next_step(self._specialist_results)
         if final_response is None and next_step is StewartNextStep.ASK_WRITER:

@@ -35,8 +35,14 @@ export function App({ eventSource }: AppProps) {
     setBusy(true);
     setError(undefined);
     try {
-      const events = await source.sendMessage(message);
-      setState((current) => reduceWriterRoomEvents(current, events));
+      const applyEvents = (events: Parameters<typeof reduceWriterRoomEvents>[1]) => {
+        setState((current) => reduceWriterRoomEvents(current, events));
+      };
+      if (source.mode === "backend") {
+        await source.sendMessage(message, applyEvents);
+      } else {
+        applyEvents(await source.sendMessage(message));
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Stewart could not process the message.");
     } finally {

@@ -510,6 +510,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "pyasn1-modules" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/41/64/55f316b729f92a552d26e00aa3b1542b2e149d0a5efe2842afff0cac7af7/google_auth-2.57.0.tar.gz", hash = "sha256:9b4f96d6a1feb5f7201231f47cfb3de08d8f176f8a61f9e461555116e95a8789", size = 370794, upload-time = "2026-08-25T19:18:26.419Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/00/f3/8508a702c094af5f6e89773f4dfdeee74913df0f41a02c21b5e7dc3d75cd/google_auth-2.57.0-py3-none-any.whl", hash = "sha256:180dafe015cfb62193bea26b677500fab5b9fd51a1e825ebf3ad9b182047ae59", size = 259728, upload-time = "2026-08-24T21:55:08.449Z" },
 ]
@@ -1221,26 +1222,32 @@ name = "stewart-agent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "fastapi" },
     { name = "google-adk" },
     { name = "parallel-web" },
     { name = "pydantic" },
     { name = "python-dotenv" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "pytest" },
     { name = "ruff" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", specifier = ">=0.115,<1.0" },
     { name = "google-adk", specifier = ">=2.0.0,<3.0.0" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28,<1.0" },
     { name = "parallel-web", specifier = ">=1.1.0,<2.0.0" },
     { name = "pydantic", specifier = ">=2.10,<3.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3,<10.0" },
     { name = "python-dotenv", specifier = ">=1.0,<2.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12,<1.0" },
+    { name = "uvicorn", specifier = ">=0.34,<1.0" },
 ]
 provides-extras = ["dev"]
 
