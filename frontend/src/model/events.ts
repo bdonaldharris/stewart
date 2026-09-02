@@ -47,7 +47,7 @@ export interface ImpactAnalysis {
 
 export interface StewardshipOption {
   title: string;
-  description: string;
+  description?: string;
   benefits: string[];
   tradeoffs: string[];
 }

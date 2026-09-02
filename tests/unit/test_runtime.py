@@ -340,6 +340,27 @@ def test_runtime_rejects_invalid_validated_specialist_state() -> None:
         asyncio.run(exercise())
 
 
+def test_runtime_forwards_observed_events_to_browser_transport() -> None:
+    events = [
+        _tool_call_event("lore_agent"),
+        _specialist_event("lore_agent", LORE_OUTPUT_KEY, _payload("COMPLETE")),
+        _stewart_event("Final guidance."),
+    ]
+    runner = _FakeRunner([events])
+    observer = AsyncMock()
+
+    async def exercise() -> object:
+        conversation = await StewartConversation.create(
+            session_service=_FakeSessionService(),
+            runner=runner,
+        )
+        return await conversation.send("A proposal", on_event=observer)
+
+    asyncio.run(exercise())
+
+    assert [call.args[0] for call in observer.await_args_list] == events
+
+
 def test_run_proposal_uses_the_conversation_production_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

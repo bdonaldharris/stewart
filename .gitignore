@@ -1,5 +1,7 @@
 .env
 .env.local
+/package.json
+/package-lock.json
 .venv/
 dist/
 __pycache__/

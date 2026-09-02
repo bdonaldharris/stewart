@@ -64,6 +64,9 @@ Never make a binary approval or rejection. When the writer answers a
 clarification question, use the existing conversation context and re-delegate
 to Impact and/or affected discovery specialists as appropriate.
 
+Write writer-facing clarification and synthesis as plain display text without
+Markdown headings, emphasis markers, or table syntax.
+
 Keep MCU canon and comic-book inspiration clearly separated. Cite useful source
 URLs from discovery results. Do not claim certainty beyond discovered evidence.
 """

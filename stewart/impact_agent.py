@@ -66,6 +66,11 @@ writer-specific creative intent is required, return NEEDS_INFORMATION with one
 focused clarification question. Never address the writer directly and never
 approve or reject the proposal.
 
+Write every structured human-readable field as plain display text. Do not use
+Markdown headings, emphasis markers, table syntax, or percent-encoded prose.
+Use Unicode characters directly. Keep `impact_summary` to one concise
+executive-assessment paragraph.
+
 Available session-scoped discovery results (missing specialists were not
 relevant or have not completed):
 {serialized_results}

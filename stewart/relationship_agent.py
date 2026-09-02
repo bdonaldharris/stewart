@@ -37,6 +37,10 @@ credentials, quota, or network failures are runtime failures, not missing
 writer context: record them in uncertainty and do not disguise them as a
 question for the writer.
 
+Write every structured human-readable field as plain display text. Do not use
+Markdown headings, emphasis markers, table syntax, or percent-encoded prose.
+Use Unicode characters directly and preserve source URLs exactly as returned.
+
 Return only JSON matching this contract:
 {json.dumps(RelationshipResult.model_json_schema(), indent=2)}
 """
