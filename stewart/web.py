@@ -170,7 +170,11 @@ class BrowserEventMapper:
                 "type": "stewart_message",
                 "message": _conversation_message(
                     "stewart",
-                    COMPLETION_MESSAGE if completed_synthesis else result.response,
+                    (
+                        COMPLETION_MESSAGE
+                        if completed_synthesis
+                        else normalize_display_text(result.response)
+                    ),
                     needs_writer_input=result.needs_writer_input,
                 ),
             }

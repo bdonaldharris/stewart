@@ -297,8 +297,17 @@ def test_mapper_emits_real_activity_clarification_impact_and_report_events() -> 
     assert "description" not in run_events[1]["report"]["options"][0]
 
 
-def test_mapper_preserves_stewarts_actual_clarification_response() -> None:
-    response = "Could you clarify when this story takes place in the MCU?"
+def test_mapper_normalizes_stewarts_actual_clarification_response_for_display() -> None:
+    response = (
+        "1. **Who** is the falling out between?\n"
+        "2. **What** is the falling out about?\n"
+        "3. **When** in the MCU timeline does it occur?"
+    )
+    expected = (
+        "1. Who is the falling out between?\n"
+        "2. What is the falling out about?\n"
+        "3. When in the MCU timeline does it occur?"
+    )
 
     events = BrowserEventMapper().from_run_result(
         _result(response=response, next_step=StewartNextStep.ASK_WRITER)
@@ -310,11 +319,12 @@ def test_mapper_preserves_stewarts_actual_clarification_response() -> None:
             "message": {
                 "id": events[0]["message"]["id"],
                 "speaker": "stewart",
-                "text": response,
+                "text": expected,
                 "needsWriterInput": True,
             },
         }
     ]
+    assert "**" not in events[0]["message"]["text"]
 
 
 def test_transport_streams_safe_error_without_leaking_provider_details() -> None:
@@ -348,7 +358,7 @@ def test_transport_keeps_clarification_messages_in_one_browser_conversation() ->
     conversation = AsyncMock()
     conversation.send.side_effect = [
         _result(
-            response="When does the story take place?",
+            response="**When** does the story take place?",
             next_step=StewartNextStep.ASK_WRITER,
         ),
         _result(response="The investigation can continue.", next_step=StewartNextStep.SYNTHESIZE),
@@ -379,6 +389,8 @@ def test_transport_keeps_clarification_messages_in_one_browser_conversation() ->
     factory.assert_awaited_once()
     assert conversation.send.await_count == 2
     assert first_events[-1]["message"]["needsWriterInput"] is True
+    assert first_events[-1]["message"]["text"] == "When does the story take place?"
+    assert "**" not in first_events[-1]["message"]["text"]
     assert second_events[-1]["message"]["needsWriterInput"] is False
     assert first_events[0]["message"]["text"] == "A cosmic character appears."
     assert second_events[0]["message"]["text"] == "Immediately after Endgame."
