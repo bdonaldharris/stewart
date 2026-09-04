@@ -129,13 +129,41 @@ interface SpeechQueueOptions {
   onSpeakingChange: (speaking: boolean) => void;
 }
 
+const MALE_ENGLISH_VOICE_NAME =
+  /\b(male|alex|albert|aman|daniel|david|eddy|fred|george|guy|mark|ralph|reed|ryan)\b/i;
+const VOICE_LOAD_WAIT_MS = 400;
+
+function isEnglishVoice(voice: SpeechSynthesisVoice): boolean {
+  return /^en(?:[-_]|$)/i.test(voice.lang);
+}
+
+export function selectStewartVoice(
+  voices: SpeechSynthesisVoice[],
+): SpeechSynthesisVoice | null {
+  const englishVoices = voices.filter(isEnglishVoice);
+  return (
+    englishVoices.find((voice) => MALE_ENGLISH_VOICE_NAME.test(voice.name)) ??
+    englishVoices.find((voice) => voice.default) ??
+    englishVoices[0] ??
+    null
+  );
+}
+
 export class BrowserSpeechQueue {
   private readonly pending: SpeechQueueItem[] = [];
   private readonly seen = new Set<string>();
   private current?: SpeechQueueItem;
   private generation = 0;
+  private selectedVoice: SpeechSynthesisVoice | null = null;
+  private voicesAvailable = false;
+  private voiceWaitExpired = false;
+  private voiceWaitTimer?: ReturnType<typeof setTimeout>;
+  private readonly handleVoicesChanged = () => this.refreshVoice();
 
-  constructor(private readonly options: SpeechQueueOptions) {}
+  constructor(private readonly options: SpeechQueueOptions) {
+    this.refreshVoice();
+    this.options.synthesis.addEventListener("voiceschanged", this.handleVoicesChanged);
+  }
 
   enqueue(items: SpeechQueueItem[]): void {
     for (const item of items) {
@@ -150,12 +178,29 @@ export class BrowserSpeechQueue {
     this.generation += 1;
     this.pending.length = 0;
     this.current = undefined;
+    if (this.voiceWaitTimer) clearTimeout(this.voiceWaitTimer);
+    this.voiceWaitTimer = undefined;
     this.options.synthesis.cancel();
     this.options.onSpeakingChange(false);
   }
 
+  dispose(): void {
+    this.cancelAndClear();
+    this.options.synthesis.removeEventListener("voiceschanged", this.handleVoicesChanged);
+  }
+
   private advance(): void {
     if (this.current) return;
+    if (this.pending.length > 0 && !this.voicesAvailable && !this.voiceWaitExpired) {
+      if (!this.voiceWaitTimer) {
+        this.voiceWaitTimer = setTimeout(() => {
+          this.voiceWaitTimer = undefined;
+          this.voiceWaitExpired = true;
+          this.advance();
+        }, VOICE_LOAD_WAIT_MS);
+      }
+      return;
+    }
     const next = this.pending.shift();
     if (!next) {
       this.options.onSpeakingChange(false);
@@ -166,7 +211,7 @@ export class BrowserSpeechQueue {
     const generation = this.generation;
     const utterance = new this.options.utterance(next.text);
     utterance.lang = "en-US";
-    utterance.voice = this.englishVoice();
+    utterance.voice = this.selectedVoice;
     utterance.onend = () => this.finish(generation);
     utterance.onerror = () => this.finish(generation);
     this.options.onSpeakingChange(true);
@@ -179,12 +224,13 @@ export class BrowserSpeechQueue {
     this.advance();
   }
 
-  private englishVoice(): SpeechSynthesisVoice | null {
+  private refreshVoice(): void {
     const voices = this.options.synthesis.getVoices();
-    return (
-      voices.find((voice) => voice.default && voice.lang.toLowerCase().startsWith("en")) ??
-      voices.find((voice) => voice.lang.toLowerCase().startsWith("en")) ??
-      null
-    );
+    this.selectedVoice = selectStewartVoice(voices);
+    if (voices.length === 0) return;
+    this.voicesAvailable = true;
+    if (this.voiceWaitTimer) clearTimeout(this.voiceWaitTimer);
+    this.voiceWaitTimer = undefined;
+    this.advance();
   }
 }

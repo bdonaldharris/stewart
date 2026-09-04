@@ -261,7 +261,7 @@ export function useVoiceMode(): VoiceModeController {
 
   useEffect(
     () => () => {
-      speechQueueRef.current?.cancelAndClear();
+      speechQueueRef.current?.dispose();
       recognitionRef.current?.abort();
       releaseMicrophone();
     },

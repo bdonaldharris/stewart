@@ -136,11 +136,18 @@ function installBrowserMocks(options: { permissionDenied?: boolean } = {}): Brow
   }
 
   const utterances: MockUtterance[] = [];
-  const speechSynthesis = {
+  const defaultVoice = {
+    default: true,
+    lang: "en-US",
+    localService: true,
+    name: "Test English Voice",
+    voiceURI: "test-english-voice",
+  } as SpeechSynthesisVoice;
+  const speechSynthesis = Object.assign(new EventTarget(), {
     speak: vi.fn((utterance: MockUtterance) => utterances.push(utterance)),
     cancel: vi.fn(),
-    getVoices: vi.fn(() => []),
-  };
+    getVoices: vi.fn(() => [defaultVoice]),
+  });
   let animationFrame: FrameRequestCallback | undefined;
 
   Object.defineProperty(window, "SpeechRecognition", {
