@@ -13,12 +13,6 @@ _BOLD_UNDERSCORES = re.compile(r"__(?=\S)(.+?)(?<=\S)__")
 _ITALIC_ASTERISKS = re.compile(r"(?<!\*)\*(?=\S)(.+?)(?<=\S)\*(?!\*)")
 _ITALIC_UNDERSCORES = re.compile(r"(?<!\w)_(?=\S)(.+?)(?<=\S)_(?!\w)")
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")
-_GENERIC_SUMMARY_LABELS = {
-    "assessment",
-    "executive assessment",
-    "impact summary",
-    "summary",
-}
 
 
 def _decode_percent_encoded_unicode(value: str) -> str:
@@ -53,21 +47,3 @@ def normalize_display_text(value: str) -> str:
         line = _INLINE_CODE.sub(r"\1", line)
         normalized_lines.append(line)
     return "\n".join(normalized_lines).strip()
-
-
-def executive_assessment(value: str, *, max_characters: int = 600) -> str:
-    """Select a concise, normalized assessment from an Impact summary."""
-    normalized = normalize_display_text(value)
-    lines = [
-        line.strip()
-        for line in normalized.splitlines()
-        if line.strip() and line.strip().lower().rstrip(":") not in _GENERIC_SUMMARY_LABELS
-    ]
-    prose = " ".join(lines)
-    sentence_ends = list(re.finditer(r"[.!?](?:[\"'’”])?(?=\s|$)", prose))
-    if len(sentence_ends) >= 2:
-        prose = prose[: sentence_ends[1].end()]
-    if len(prose) <= max_characters:
-        return prose
-    boundary = prose.rfind(" ", 0, max_characters - 1)
-    return f"{prose[: boundary if boundary > 0 else max_characters - 1].rstrip()}…"

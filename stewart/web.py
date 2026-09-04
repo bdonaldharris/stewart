@@ -33,15 +33,20 @@ from stewart.contracts import (
     TimelineResult,
     handle_specialist_result,
 )
-from stewart.display_text import executive_assessment, normalize_display_text
-from stewart.runtime import RunResult, RuntimeEventObserver, StewartConversation
+from stewart.display_text import normalize_display_text
+from stewart.runtime import (
+    SYNTHESIS_COMPLETE_RESPONSE,
+    RunResult,
+    RuntimeEventObserver,
+    StewartConversation,
+)
 
 logger = logging.getLogger(__name__)
 
 SAFE_RUNTIME_ERROR = (
     "Stewart could not complete this turn. Check the server configuration and try again."
 )
-COMPLETION_MESSAGE = "The investigation is complete. I’ve prepared the Stewardship Report."
+COMPLETION_MESSAGE = SYNTHESIS_COMPLETE_RESPONSE
 
 _AGENT_BY_TOOL = {
     "lore_agent": "lore",
@@ -163,7 +168,9 @@ class BrowserEventMapper:
 
     def from_run_result(self, result: RunResult) -> list[BrowserEvent]:
         completed_synthesis = (
-            result.next_step is StewartNextStep.SYNTHESIZE and result.impact_result is not None
+            result.next_step is StewartNextStep.SYNTHESIZE
+            and result.impact_result is not None
+            and result.stewardship_report is not None
         )
         events = [
             {
@@ -302,33 +309,26 @@ def _impact_result(result: ImpactResult) -> BrowserEvent:
 
 
 def _report(result: RunResult) -> BrowserEvent:
-    impact = result.impact_result
-    if impact is None:
-        raise ValueError("A completed Impact result is required to build the report")
-    discovery_findings = [
-        normalize_display_text(finding.finding)
-        for specialist in (
-            result.lore_result,
-            result.timeline_result,
-            result.relationship_result,
-        )
-        if specialist is not None
-        for finding in specialist.findings
-    ]
+    report = result.stewardship_report
+    if report is None:
+        raise ValueError("A completed Stewardship Report is required for browser mapping")
     return {
-        "assessment": executive_assessment(impact.impact_summary or ""),
-        "continuityConsiderations": discovery_findings,
-        "opportunities": [normalize_display_text(item) for item in impact.opportunities],
+        "assessment": normalize_display_text(report.assessment),
+        "continuityConsiderations": [
+            normalize_display_text(item) for item in report.continuity_considerations
+        ],
+        "opportunities": [normalize_display_text(item) for item in report.opportunities],
         "audienceConsiderations": [
-            normalize_display_text(item) for item in impact.audience_considerations
+            normalize_display_text(item) for item in report.audience_considerations
         ],
         "options": [
             {
-                "title": normalize_display_text(tradeoff.approach),
-                "benefits": [normalize_display_text(item) for item in tradeoff.benefits],
-                "tradeoffs": [normalize_display_text(item) for item in tradeoff.costs],
+                "title": normalize_display_text(option.title),
+                "description": normalize_display_text(option.description),
+                "benefits": [normalize_display_text(item) for item in option.benefits],
+                "tradeoffs": [normalize_display_text(item) for item in option.tradeoffs],
             }
-            for tradeoff in impact.tradeoffs
+            for option in report.options
         ],
     }
 

@@ -1,8 +1,7 @@
-import type { ImpactAnalysis, StewardshipReportData } from "../model/events";
+import type { StewardshipReportData } from "../model/events";
 
 interface StewardshipReportProps {
   report: StewardshipReportData;
-  impact?: ImpactAnalysis;
 }
 
 function ReportList({ items }: { items: string[] }) {
@@ -18,7 +17,7 @@ function ReportList({ items }: { items: string[] }) {
   );
 }
 
-export function StewardshipReport({ report, impact }: StewardshipReportProps) {
+export function StewardshipReport({ report }: StewardshipReportProps) {
   return (
     <article className="report-panel" aria-label="Stewardship Report">
       <header className="report-header">
@@ -51,10 +50,6 @@ export function StewardshipReport({ report, impact }: StewardshipReportProps) {
         <section className="report-section">
           <p className="eyebrow">Audience Considerations</p>
           <ReportList items={report.audienceConsiderations} />
-        </section>
-        <section className="report-section">
-          <p className="eyebrow">Affected Areas</p>
-          <ReportList items={impact?.affectedAreas ?? []} />
         </section>
       </div>
 

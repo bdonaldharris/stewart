@@ -98,13 +98,19 @@ describe("Writer's Room", () => {
     expect(screen.queryByText("Investigation complete")).not.toBeInTheDocument();
     expect(screen.getByText("Stewart's Assessment")).toBeInTheDocument();
     expect(screen.getByText("Audience Considerations")).toBeInTheDocument();
+    expect(screen.queryByText("Affected Areas")).not.toBeInTheDocument();
     expect(screen.getByText("Options & Tradeoffs")).toBeInTheDocument();
     expect(screen.getByText("Introduce as a contained supporting role")).toBeInTheDocument();
     expect(
-      screen.getAllByText(
-        "A viable creative path with a different balance of narrative reach and continuity load.",
+      screen.getByText(
+        "Test the mechanic and relationship fit before creating cross-project obligations.",
       ),
-    ).toHaveLength(2);
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Accept broader continuity commitments in exchange for immediate connective value.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Investigation/ })).toHaveLength(4);
     expect(screen.queryByText("4 returned")).not.toBeInTheDocument();
     expect(

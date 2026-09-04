@@ -3,15 +3,24 @@ from typing import Any, cast
 
 from google.adk.agents.invocation_context import InvocationContext
 from google.adk.flows.llm_flows.functions import handle_function_call_list_async
+from google.adk.models.llm_request import LlmRequest
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
-from stewart.agent import STEWART_INSTRUCTION, root_agent
+from stewart.agent import (
+    STEWART_INSTRUCTION,
+    _require_stewardship_report_after_impact,
+    root_agent,
+    submit_stewardship_report,
+)
 from stewart.contracts import (
     IMPACT_OUTPUT_KEY,
     LORE_OUTPUT_KEY,
     RELATIONSHIP_OUTPUT_KEY,
+    STEWARDSHIP_REPORT_OUTPUT_KEY,
     TIMELINE_OUTPUT_KEY,
+    StewardshipOption,
+    StewardshipReport,
 )
 from stewart.impact_agent import build_impact_instruction, impact_agent
 from stewart.lore_agent import LORE_INSTRUCTION, lore_agent
@@ -48,6 +57,7 @@ def test_parallel_search_is_limited_to_discovery_specialists() -> None:
 
     assert impact_agent.tools == []
     assert [tool.name for tool in root_agent.tools] == [
+        "submit_stewardship_report",
         "lore_agent",
         "timeline_agent",
         "relationship_agent",
@@ -77,6 +87,68 @@ def test_stewart_requires_impact_after_discovery_fan_in() -> None:
     assert "call `impact_agent` by" in STEWART_INSTRUCTION
     assert "itself in the next model turn" in STEWART_INSTRUCTION
     assert "Never call `impact_agent` in the same model response" in STEWART_INSTRUCTION
+
+
+def test_stewart_owns_the_typed_decision_synthesis_boundary() -> None:
+    assert "call `submit_stewardship_report` exactly once" in STEWART_INSTRUCTION
+    assert "Investigations provide depth" in STEWART_INSTRUCTION
+    assert "Do not repeat Impact's summary" in STEWART_INSTRUCTION
+    assert "Do not copy Impact's complete lists" in STEWART_INSTRUCTION
+    assert "Do not add an Affected Areas or Future Implications section" in STEWART_INSTRUCTION
+
+
+def test_stewart_report_tool_stores_the_validated_contract_in_session_state() -> None:
+    class _Context:
+        state: dict[str, object] = {}
+
+    report = StewardshipReport(
+        assessment="The decision turns on a real creative tension.",
+        continuity_considerations=["One constraint governs the choice."],
+        opportunities=["The constraint can create useful conflict."],
+        audience_considerations=["The change needs clear setup."],
+        options=[
+            StewardshipOption(
+                title="Use a bounded role",
+                description="Test the premise without creating an open-ended obligation.",
+                benefits=["Limits continuity load"],
+                tradeoffs=["Reduces immediate reach"],
+            )
+        ],
+    )
+
+    response = submit_stewardship_report(report, cast(Any, _Context()))
+
+    assert response == {"accepted": True}
+    assert _Context.state[STEWARDSHIP_REPORT_OUTPUT_KEY] == report.model_dump(mode="json")
+
+
+def test_stewart_forces_typed_report_submission_after_complete_impact() -> None:
+    class _Context:
+        state = {IMPACT_OUTPUT_KEY: {"status": "COMPLETE"}}
+
+    request = LlmRequest()
+
+    _require_stewardship_report_after_impact(cast(Any, _Context()), request)
+
+    config = request.config.tool_config.function_calling_config
+    assert config.mode is types.FunctionCallingConfigMode.ANY
+    assert config.allowed_function_names == ["submit_stewardship_report"]
+
+
+def test_stewart_does_not_force_report_before_completed_impact_or_after_submission() -> None:
+    class _NeedsInformationContext:
+        state = {IMPACT_OUTPUT_KEY: {"status": "NEEDS_INFORMATION"}}
+
+    class _ReportSubmittedContext:
+        state = {
+            IMPACT_OUTPUT_KEY: {"status": "COMPLETE"},
+            STEWARDSHIP_REPORT_OUTPUT_KEY: {"assessment": "already submitted"},
+        }
+
+    for context in (_NeedsInformationContext(), _ReportSubmittedContext()):
+        request = LlmRequest()
+        _require_stewardship_report_after_impact(cast(Any, context), request)
+        assert request.config.tool_config is None
 
 
 def test_agents_request_plain_display_text_for_browser_contracts() -> None:

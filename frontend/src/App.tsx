@@ -151,10 +151,7 @@ export function App({ eventSource }: AppProps) {
                       impact={state.impact}
                     />
                     {state.report ? (
-                      <StewardshipReport
-                        report={state.report}
-                        impact={state.impact}
-                      />
+                      <StewardshipReport report={state.report} />
                     ) : !specialistsInWorkspace ? (
                       <section className="synthesis-panel panel" aria-label="Stewart synthesis">
                         <div className="synthesis-mark">S</div>

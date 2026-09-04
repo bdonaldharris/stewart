@@ -24,6 +24,7 @@ LORE_OUTPUT_KEY = "lore_result"
 TIMELINE_OUTPUT_KEY = "timeline_result"
 RELATIONSHIP_OUTPUT_KEY = "relationship_result"
 IMPACT_OUTPUT_KEY = "impact_result"
+STEWARDSHIP_REPORT_OUTPUT_KEY = "stewardship_report"
 
 
 class EvidenceSource(BaseModel):
@@ -160,6 +161,29 @@ class ImpactResult(_SpecialistResultBase):
         ):
             raise ValueError("COMPLETE Impact result requires an impact_summary")
         return self
+
+
+class StewardshipOption(BaseModel):
+    """One decision path synthesized by Stewart for the writer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    benefits: list[str] = Field(min_length=1)
+    tradeoffs: list[str] = Field(min_length=1)
+
+
+class StewardshipReport(BaseModel):
+    """Stewart's prioritized decision-support synthesis."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    assessment: str = Field(min_length=1)
+    continuity_considerations: list[str] = Field(min_length=1)
+    opportunities: list[str] = Field(default_factory=list)
+    audience_considerations: list[str] = Field(default_factory=list)
+    options: list[StewardshipOption] = Field(min_length=1)
 
 
 SpecialistResult: TypeAlias = LoreResult | TimelineResult | RelationshipResult | ImpactResult
