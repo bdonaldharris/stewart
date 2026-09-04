@@ -83,6 +83,11 @@ every result to Stewart. Stewart then delegates the combined session-scoped
 findings to Impact in the next model turn. Specialists communicate only with
 Stewart, never with one another or the writer.
 
+Impact retains the detailed consequence analysis and supporting investigative
+record. After Impact completes, Stewart submits a separate typed Stewardship
+Report that prioritizes the decision tension, material continuity constraints,
+and meaningful creative paths without reproducing the specialist structures.
+
 Each specialist stores a schema-validated result in ADK session state, and the
 runtime deterministically branches on the accumulated `COMPLETE` and
 `NEEDS_INFORMATION` statuses, with an observable `ANALYZE_IMPACT` stage between
@@ -231,14 +236,14 @@ mocks.
 
 ### Implementation map
 
-- `stewart/agent.py` — Stewart supervisor and ADK application
+- `stewart/agent.py` — Stewart supervisor, ADK application, and typed final-report submission
 - `stewart/lore_agent.py` — separate Lore Gemini subagent
 - `stewart/timeline_agent.py` — separate Timeline Gemini subagent
 - `stewart/relationship_agent.py` — separate Relationship Gemini subagent
 - `stewart/impact_agent.py` — separate Impact Gemini synthesis subagent
-- `stewart/contracts.py` — typed specialist results and deterministic branch decisions
+- `stewart/contracts.py` — typed specialist results, Stewart report, and branch decisions
 - `stewart/parallel_search.py` — async official Parallel SDK integration
-- `stewart/runtime.py` — accumulated contract handling and multi-turn ADK session
+- `stewart/runtime.py` — accumulated contracts and multi-turn in-memory ADK session
 - `stewart/cli.py` — clarification loop over one temporary investigation
 - `tests/unit/` — production runtime, contract, Parallel, CLI, and topology tests
 - `tests/integration/` — credentialed end-to-end agent trace test

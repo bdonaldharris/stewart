@@ -5,14 +5,33 @@ from stewart.contracts import (
     IMPACT_OUTPUT_KEY,
     LORE_OUTPUT_KEY,
     RELATIONSHIP_OUTPUT_KEY,
+    STEWARDSHIP_REPORT_OUTPUT_KEY,
     TIMELINE_OUTPUT_KEY,
     ImpactResult,
     LoreResult,
     RelationshipResult,
+    StewardshipReport,
     StewartNextStep,
     TimelineResult,
     handle_specialist_result,
 )
+
+
+def _stewardship_report_payload() -> dict[str, object]:
+    return {
+        "assessment": "The decision turns on preserving the established rule while earning change.",
+        "continuity_considerations": ["Two specialist findings establish one shared constraint."],
+        "opportunities": ["The constraint can become a source of character conflict."],
+        "audience_considerations": ["The change needs an explicit on-screen explanation."],
+        "options": [
+            {
+                "title": "Preserve the established rule",
+                "description": "Keep the premise bounded by the existing continuity constraint.",
+                "benefits": ["Protects audience understanding"],
+                "tradeoffs": ["Narrows the immediate story path"],
+            }
+        ],
+    }
 
 
 @pytest.mark.parametrize("result_model", [LoreResult, TimelineResult, RelationshipResult])
@@ -139,3 +158,52 @@ def test_complete_impact_requires_a_summary() -> None:
                 "tradeoffs": [],
             }
         )
+
+
+def test_stewardship_report_contract_is_decision_oriented_without_affected_areas() -> None:
+    report = StewardshipReport.model_validate(_stewardship_report_payload())
+
+    assert report.options[0].description
+    assert "affected_areas" not in StewardshipReport.model_fields
+    assert STEWARDSHIP_REPORT_OUTPUT_KEY == "stewardship_report"
+
+    payload_with_affected_areas = {
+        **_stewardship_report_payload(),
+        "affected_areas": ["An impact-only detail"],
+    }
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        StewardshipReport.model_validate(payload_with_affected_areas)
+
+
+@pytest.mark.parametrize("invalid_item", ["", "   ", "-", "***", "###", "1."])
+def test_stewardship_report_rejects_effectively_empty_audience_items(
+    invalid_item: str,
+) -> None:
+    payload = {
+        **_stewardship_report_payload(),
+        "audience_considerations": [invalid_item],
+    }
+
+    with pytest.raises(ValidationError):
+        StewardshipReport.model_validate(payload)
+
+
+def test_stewardship_report_accepts_meaningful_markdown_and_empty_optional_sections() -> None:
+    payload = {
+        **_stewardship_report_payload(),
+        "opportunities": [],
+        "audience_considerations": ["**Audience trust** depends on clear setup."],
+    }
+
+    report = StewardshipReport.model_validate(payload)
+
+    assert report.opportunities == []
+    assert report.audience_considerations == ["**Audience trust** depends on clear setup."]
+
+
+def test_stewardship_report_rejects_formatting_only_option_items() -> None:
+    payload = _stewardship_report_payload()
+    payload["options"][0]["benefits"] = ["-"]
+
+    with pytest.raises(ValidationError, match="meaningful display text"):
+        StewardshipReport.model_validate(payload)

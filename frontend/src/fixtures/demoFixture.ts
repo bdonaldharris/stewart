@@ -156,14 +156,26 @@ const stewardshipReport: StewardshipReportData = {
     "Define what can and cannot be preserved before the mechanic resolves a story problem.",
     "Protect the emotional ownership of established character relationships.",
   ],
-  opportunities: impactAnalysis.opportunities,
-  audienceConsiderations: impactAnalysis.audienceConsiderations,
-  options: impactAnalysis.tradeoffs.map((tradeoff) => ({
-    title: tradeoff.approach,
-    description: "A viable creative path with a different balance of narrative reach and continuity load.",
-    benefits: tradeoff.benefits,
-    tradeoffs: tradeoff.costs,
-  })),
+  opportunities: [
+    "Make the mechanic's limits a source of character conflict while connecting cosmic storylines.",
+  ],
+  audienceConsiderations: [
+    "Earn the connective role by explaining its limits and preserving established characters' emotional ownership.",
+  ],
+  options: [
+    {
+      title: "Introduce as a contained supporting role",
+      description: "Test the mechanic and relationship fit before creating cross-project obligations.",
+      benefits: ["Lower continuity load", "Space to establish clear limits"],
+      tradeoffs: ["Less immediate franchise momentum"],
+    },
+    {
+      title: "Position as a recurring connective character",
+      description: "Accept broader continuity commitments in exchange for immediate connective value.",
+      benefits: ["Stronger cross-project utility", "Natural future story paths"],
+      tradeoffs: ["More timeline and relationship commitments"],
+    },
+  ],
 };
 
 class DemoFixtureEventSource implements WriterRoomEventSource {

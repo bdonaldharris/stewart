@@ -1,4 +1,4 @@
-from stewart.display_text import executive_assessment, normalize_display_text
+from stewart.display_text import normalize_display_text
 
 
 def test_normalize_display_text_decodes_unicode_and_removes_markdown_artifacts() -> None:
@@ -18,12 +18,8 @@ def test_normalize_display_text_preserves_legitimate_percent_signs_and_ascii_esc
     assert normalize_display_text(value) == value
 
 
-def test_executive_assessment_uses_two_clean_sentences_instead_of_a_markdown_report() -> None:
-    assessment = executive_assessment(
-        "### Impact summary\n"
-        "**The role creates a bounded commitment.** It should remain focused.\n\n"
-        "| Area | Effect |\n| --- | --- |\n| Team | Changes |"
+def test_normalize_display_text_removes_formatting_only_lines() -> None:
+    assert normalize_display_text("-\n***\n___\n###\n1.") == ""
+    assert normalize_display_text("- **Audience trust** requires clear setup.") == (
+        "- Audience trust requires clear setup."
     )
-
-    assert assessment == "The role creates a bounded commitment. It should remain focused."
-    assert "|" not in assessment

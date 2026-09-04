@@ -18,6 +18,8 @@ from stewart.contracts import (
     RelationshipFinding,
     RelationshipResult,
     SpecialistStatus,
+    StewardshipOption,
+    StewardshipReport,
     StewartNextStep,
     TimelineFinding,
     TimelineResult,
@@ -91,6 +93,32 @@ def _impact_result() -> ImpactResult:
     )
 
 
+def _stewardship_report() -> StewardshipReport:
+    return StewardshipReport(
+        assessment=(
+            "The central decision is whether the recurring role earns the continuity "
+            "commitment created by its new story rule."
+        ),
+        continuity_considerations=[
+            "The canon placement and future rule constraints combine into one bounded commitment."
+        ],
+        opportunities=["Use the rule's limitation to generate character conflict."],
+        audience_considerations=[
+            "Explain the limitation on screen so the creative payoff preserves audience trust."
+        ],
+        options=[
+            StewardshipOption(
+                title="Test the premise in a supporting role",
+                description=(
+                    "Keep the first appearance bounded while proving the rule's story value."
+                ),
+                benefits=["Limits continuity load"],
+                tradeoffs=["Delays broader franchise reach"],
+            )
+        ],
+    )
+
+
 def _timeline_result() -> TimelineResult:
     return TimelineResult(
         status=SpecialistStatus.COMPLETE,
@@ -132,6 +160,7 @@ def _result(
     response: str,
     next_step: StewartNextStep,
     specialist_results: dict[str, object] | None = None,
+    stewardship_report: StewardshipReport | None = None,
 ) -> RunResult:
     return RunResult(
         response=response,
@@ -139,6 +168,7 @@ def _result(
         tool_calls=(),
         next_step=next_step,
         specialist_results=specialist_results or {},
+        stewardship_report=stewardship_report,
     )
 
 
@@ -268,6 +298,7 @@ def test_mapper_emits_real_activity_clarification_impact_and_report_events() -> 
             response="Stewart's evidence-backed assessment.",
             next_step=StewartNextStep.SYNTHESIZE,
             specialist_results={LORE_OUTPUT_KEY: lore, IMPACT_OUTPUT_KEY: impact},
+            stewardship_report=_stewardship_report(),
         )
     )
 
@@ -279,22 +310,51 @@ def test_mapper_emits_real_activity_clarification_impact_and_report_events() -> 
     assert impact_events[-1]["result"]["risks"] == [
         "The new mechanic could resolve conflict too easily."
     ]
+    assert impact_events[-1]["result"]["audienceConsiderations"] == [
+        "The mechanic needs consistent rules."
+    ]
     assert run_events[0]["type"] == "stewart_message"
     assert run_events[0]["message"]["text"] == COMPLETION_MESSAGE
     assert run_events[0]["message"]["needsWriterInput"] is False
     assert run_events[1]["type"] == "report_ready"
     assessment = run_events[1]["report"]["assessment"]
-    assert assessment == (
-        "A protégé creates a bounded recurring continuity commitment. "
-        "The role should remain focused."
-    )
+    assert assessment == _stewardship_report().assessment
+    assert assessment != impact.impact_summary
     assert "Stewart's evidence-backed assessment." not in assessment
     assert all(marker not in assessment for marker in ("###", "**", "|"))
     assert run_events[1]["report"]["continuityConsiderations"] == [
-        "The Nova Corps connection needs a defined point in canon."
+        "The canon placement and future rule constraints combine into one bounded commitment."
     ]
-    assert run_events[1]["report"]["options"][0]["title"] == "Use a supporting role"
-    assert "description" not in run_events[1]["report"]["options"][0]
+    assert run_events[1]["report"]["opportunities"] != impact.opportunities
+    assert run_events[1]["report"]["audienceConsiderations"] != impact.audience_considerations
+    assert run_events[1]["report"]["options"][0]["title"] == (
+        "Test the premise in a supporting role"
+    )
+    assert run_events[1]["report"]["options"][0]["description"]
+    assert "affectedAreas" not in run_events[1]["report"]
+
+
+def test_mapper_normalizes_meaningful_report_markdown_without_empty_bullets() -> None:
+    report = _stewardship_report().model_copy(
+        update={
+            "opportunities": [],
+            "audience_considerations": ["**Audience trust** requires clear setup."],
+        }
+    )
+
+    events = BrowserEventMapper().from_run_result(
+        _result(
+            response="Synthesis complete.",
+            next_step=StewartNextStep.SYNTHESIZE,
+            specialist_results={IMPACT_OUTPUT_KEY: _impact_result()},
+            stewardship_report=report,
+        )
+    )
+
+    mapped_report = events[1]["report"]
+    assert mapped_report["opportunities"] == []
+    assert mapped_report["audienceConsiderations"] == ["Audience trust requires clear setup."]
+    assert "-" not in mapped_report["audienceConsiderations"]
 
 
 def test_mapper_normalizes_stewarts_actual_clarification_response_for_display() -> None:

@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from stewart.display_text import normalize_display_text
 
 
 class SpecialistStatus(StrEnum):
@@ -24,6 +26,7 @@ LORE_OUTPUT_KEY = "lore_result"
 TIMELINE_OUTPUT_KEY = "timeline_result"
 RELATIONSHIP_OUTPUT_KEY = "relationship_result"
 IMPACT_OUTPUT_KEY = "impact_result"
+STEWARDSHIP_REPORT_OUTPUT_KEY = "stewardship_report"
 
 
 class EvidenceSource(BaseModel):
@@ -160,6 +163,69 @@ class ImpactResult(_SpecialistResultBase):
         ):
             raise ValueError("COMPLETE Impact result requires an impact_summary")
         return self
+
+
+class StewardshipOption(BaseModel):
+    """One decision path synthesized by Stewart for the writer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    benefits: list[str] = Field(min_length=1)
+    tradeoffs: list[str] = Field(min_length=1)
+
+    @field_validator("title", "description")
+    @classmethod
+    def validate_meaningful_text(cls, value: str) -> str:
+        """Reject option prose that becomes empty at the display boundary."""
+        return _require_meaningful_display_text(value)
+
+    @field_validator("benefits", "tradeoffs")
+    @classmethod
+    def validate_meaningful_items(cls, value: list[str]) -> list[str]:
+        """Reject formatting-only option list entries."""
+        return _require_meaningful_display_items(value)
+
+
+class StewardshipReport(BaseModel):
+    """Stewart's prioritized decision-support synthesis."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    assessment: str = Field(min_length=1)
+    continuity_considerations: list[str] = Field(min_length=1)
+    opportunities: list[str] = Field(default_factory=list)
+    audience_considerations: list[str] = Field(default_factory=list)
+    options: list[StewardshipOption] = Field(min_length=1)
+
+    @field_validator("assessment")
+    @classmethod
+    def validate_meaningful_text(cls, value: str) -> str:
+        """Reject report prose that becomes empty at the display boundary."""
+        return _require_meaningful_display_text(value)
+
+    @field_validator(
+        "continuity_considerations",
+        "opportunities",
+        "audience_considerations",
+    )
+    @classmethod
+    def validate_meaningful_items(cls, value: list[str]) -> list[str]:
+        """Reject formatting-only report list entries."""
+        return _require_meaningful_display_items(value)
+
+
+def _require_meaningful_display_text(value: str) -> str:
+    if not normalize_display_text(value):
+        raise ValueError("must contain meaningful display text")
+    return value
+
+
+def _require_meaningful_display_items(value: list[str]) -> list[str]:
+    for item in value:
+        _require_meaningful_display_text(item)
+    return value
 
 
 SpecialistResult: TypeAlias = LoreResult | TimelineResult | RelationshipResult | ImpactResult

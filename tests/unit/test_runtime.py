@@ -11,10 +11,11 @@ from stewart.contracts import (
     IMPACT_OUTPUT_KEY,
     LORE_OUTPUT_KEY,
     RELATIONSHIP_OUTPUT_KEY,
+    STEWARDSHIP_REPORT_OUTPUT_KEY,
     TIMELINE_OUTPUT_KEY,
     StewartNextStep,
 )
-from stewart.runtime import StewartConversation, run_proposal
+from stewart.runtime import SYNTHESIS_COMPLETE_RESPONSE, StewartConversation, run_proposal
 
 
 def _payload(
@@ -52,11 +53,35 @@ def _impact_payload(
     }
 
 
+def _report_payload() -> dict[str, object]:
+    return {
+        "assessment": "The choice turns on balancing continuity cost against story value.",
+        "continuity_considerations": ["The combined evidence establishes one central constraint."],
+        "opportunities": ["The constraint can generate character conflict."],
+        "audience_considerations": ["The change needs a clear on-screen explanation."],
+        "options": [
+            {
+                "title": "Use a bounded role",
+                "description": "Protect the established rule while testing the premise.",
+                "benefits": ["Limits continuity load"],
+                "tradeoffs": ["Reduces immediate reach"],
+            }
+        ],
+    }
+
+
 def _specialist_event(author: str, output_key: str, payload: dict[str, object]) -> Event:
     return Event(
         author=author,
         actions=EventActions(state_delta={output_key: payload}),
         content=types.Content(role="model", parts=[types.Part(text=f"structured {author} output")]),
+    )
+
+
+def _report_event() -> Event:
+    return Event(
+        author="stewart",
+        actions=EventActions(state_delta={STEWARDSHIP_REPORT_OUTPUT_KEY: _report_payload()}),
     )
 
 
@@ -123,6 +148,7 @@ def test_runtime_retains_discovery_for_impact_across_same_session_clarification(
             [
                 _specialist_event("timeline_agent", TIMELINE_OUTPUT_KEY, _payload("COMPLETE")),
                 _specialist_event("impact_agent", IMPACT_OUTPUT_KEY, _impact_payload("COMPLETE")),
+                _report_event(),
                 _stewart_event("The combined investigation found these considerations."),
             ],
         ]
@@ -152,6 +178,8 @@ def test_runtime_retains_discovery_for_impact_across_same_session_clarification(
     assert second.timeline_result is not None
     assert second.relationship_result is not None
     assert second.impact_result is not None
+    assert second.stewardship_report is not None
+    assert second.stewardship_report.assessment == _report_payload()["assessment"]
     assert len(second.specialist_results) == 4
     assert conversation.session_id == "investigation-123"
     assert len(session_service.create_calls) == 1
@@ -175,6 +203,7 @@ def test_impact_needs_information_continues_in_the_same_session() -> None:
             ],
             [
                 _specialist_event("impact_agent", IMPACT_OUTPUT_KEY, _impact_payload("COMPLETE")),
+                _report_event(),
                 _stewart_event("Here are the risks, opportunities, and tradeoffs."),
             ],
         ]
@@ -226,6 +255,7 @@ def test_completed_discovery_without_impact_exposes_the_impact_stage() -> None:
 
     assert result.next_step is StewartNextStep.ANALYZE_IMPACT
     assert result.impact_result is None
+    assert result.stewardship_report is None
 
 
 def test_new_discovery_invalidates_an_older_impact_result() -> None:
@@ -234,6 +264,7 @@ def test_new_discovery_invalidates_an_older_impact_result() -> None:
             [
                 _specialist_event("lore_agent", LORE_OUTPUT_KEY, _payload("COMPLETE")),
                 _specialist_event("impact_agent", IMPACT_OUTPUT_KEY, _impact_payload("COMPLETE")),
+                _report_event(),
                 _stewart_event("Initial guidance."),
             ],
             [
@@ -255,6 +286,7 @@ def test_new_discovery_invalidates_an_older_impact_result() -> None:
 
     assert result.next_step is StewartNextStep.ANALYZE_IMPACT
     assert result.impact_result is None
+    assert result.stewardship_report is None
 
 
 def test_runtime_trace_orders_impact_after_concurrent_discovery_calls() -> None:
@@ -269,6 +301,7 @@ def test_runtime_trace_orders_impact_after_concurrent_discovery_calls() -> None:
                 ),
                 _tool_call_event("impact_agent"),
                 _specialist_event("impact_agent", IMPACT_OUTPUT_KEY, _impact_payload("COMPLETE")),
+                _report_event(),
                 _stewart_event("Final stewardship guidance."),
             ]
         ]
@@ -287,6 +320,51 @@ def test_runtime_trace_orders_impact_after_concurrent_discovery_calls() -> None:
     assert result.tool_calls[3] == "impact_agent"
     assert result.impact_result is not None
     assert len(result.specialist_results) == 4
+    assert result.stewardship_report is not None
+
+
+def test_runtime_requires_typed_stewart_report_after_completed_impact() -> None:
+    runner = _FakeRunner(
+        [
+            [
+                _specialist_event("impact_agent", IMPACT_OUTPUT_KEY, _impact_payload("COMPLETE")),
+                _stewart_event("Final guidance without a structured report."),
+            ]
+        ]
+    )
+
+    async def exercise() -> None:
+        conversation = await StewartConversation.create(
+            session_service=_FakeSessionService(),
+            runner=runner,
+        )
+        await conversation.send("A proposal")
+
+    with pytest.raises(RuntimeError, match="without a Stewardship Report"):
+        asyncio.run(exercise())
+
+
+def test_runtime_uses_completion_response_when_report_tool_is_the_final_model_action() -> None:
+    runner = _FakeRunner(
+        [
+            [
+                _specialist_event("impact_agent", IMPACT_OUTPUT_KEY, _impact_payload("COMPLETE")),
+                _report_event(),
+            ]
+        ]
+    )
+
+    async def exercise() -> object:
+        conversation = await StewartConversation.create(
+            session_service=_FakeSessionService(),
+            runner=runner,
+        )
+        return await conversation.send("A proposal")
+
+    result = asyncio.run(exercise())
+
+    assert result.response == SYNTHESIS_COMPLETE_RESPONSE
+    assert result.stewardship_report is not None
 
 
 def test_runtime_uses_specialist_questions_only_when_stewart_produces_no_text() -> None:

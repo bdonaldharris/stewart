@@ -17,18 +17,21 @@ from stewart.contracts import (
     IMPACT_OUTPUT_KEY,
     LORE_OUTPUT_KEY,
     RELATIONSHIP_OUTPUT_KEY,
+    STEWARDSHIP_REPORT_OUTPUT_KEY,
     TIMELINE_OUTPUT_KEY,
     ImpactResult,
     LoreResult,
     RelationshipResult,
     SpecialistResult,
     SpecialistStatus,
+    StewardshipReport,
     StewartNextStep,
     TimelineResult,
     handle_specialist_result,
 )
 
 APP_NAME = "stewart"
+SYNTHESIS_COMPLETE_RESPONSE = "The investigation is complete. I’ve prepared the Stewardship Report."
 SPECIALIST_OUTPUT_KEYS = (
     LORE_OUTPUT_KEY,
     TIMELINE_OUTPUT_KEY,
@@ -48,6 +51,7 @@ class RunResult:
     tool_calls: tuple[str, ...]
     next_step: StewartNextStep | None
     specialist_results: Mapping[str, SpecialistResult]
+    stewardship_report: StewardshipReport | None = None
 
     @property
     def needs_writer_input(self) -> bool:
@@ -103,6 +107,7 @@ class StewartConversation:
         self._runner = runner
         self._session_service = session_service
         self._specialist_results: dict[str, SpecialistResult] = {}
+        self._stewardship_report: StewardshipReport | None = None
         self.user_id = user_id
         self.session_id = session_id
 
@@ -165,10 +170,15 @@ class StewartConversation:
             for output_key in SPECIALIST_OUTPUT_KEYS:
                 validated_output = event.actions.state_delta.get(output_key)
                 if validated_output is not None:
+                    self._stewardship_report = None
                     if output_key != IMPACT_OUTPUT_KEY:
                         self._specialist_results.pop(IMPACT_OUTPUT_KEY, None)
                     decision = handle_specialist_result(output_key, validated_output)
                     self._specialist_results[output_key] = decision.result
+
+            validated_report = event.actions.state_delta.get(STEWARDSHIP_REPORT_OUTPUT_KEY)
+            if validated_report is not None:
+                self._stewardship_report = StewardshipReport.model_validate(validated_report)
 
             if event.author == root_agent.name and event.is_final_response():
                 event_text = _text_from_event(event)
@@ -181,6 +191,10 @@ class StewartConversation:
         next_step = _next_step(self._specialist_results)
         if final_response is None and next_step is StewartNextStep.ASK_WRITER:
             final_response = _clarification_fallback(self._specialist_results)
+        if next_step is StewartNextStep.SYNTHESIZE and self._stewardship_report is None:
+            raise RuntimeError("Stewart completed Impact without a Stewardship Report")
+        if final_response is None and next_step is StewartNextStep.SYNTHESIZE:
+            final_response = SYNTHESIS_COMPLETE_RESPONSE
         if final_response is None:
             raise RuntimeError("Stewart completed without a final writer response")
 
@@ -190,6 +204,7 @@ class StewartConversation:
             tool_calls=tuple(tool_calls),
             next_step=next_step,
             specialist_results=dict(self._specialist_results),
+            stewardship_report=self._stewardship_report,
         )
 
 

@@ -76,7 +76,11 @@ def test_live_stewart_discovery_to_impact_slice() -> None:
     else:
         assert result.impact_result.status is SpecialistStatus.COMPLETE
         assert result.next_step is StewartNextStep.SYNTHESIZE
+        assert result.stewardship_report is not None
         assert result.impact_result.impact_summary
+        assert result.stewardship_report.assessment.strip()
+        assert result.stewardship_report.continuity_considerations
+        assert result.stewardship_report.options
         assert any(
             [
                 result.impact_result.risks,
