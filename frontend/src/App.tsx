@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { ConversationPanel, PromptComposer } from "./components/ConversationPanel";
+import { ConversationComposer, ConversationPanel } from "./components/ConversationPanel";
 import { Header } from "./components/Header";
 import { InvestigationWorkspace } from "./components/InvestigationWorkspace";
 import { ReturnedInvestigations } from "./components/ReturnedInvestigations";
@@ -11,6 +11,7 @@ import {
   createConfiguredEventSource,
   type WriterRoomEventSource,
 } from "./services/eventSource";
+import { useVoiceMode } from "./voice/useVoiceMode";
 
 interface AppProps {
   eventSource?: WriterRoomEventSource;
@@ -24,6 +25,7 @@ export function App({ eventSource }: AppProps) {
   const [clarificationDemo, setClarificationDemo] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const voice = useVoiceMode();
 
   const fixtureMode = source.mode === "fixture";
   const specialistsInWorkspace = agentIds.some((agent) => {
@@ -37,6 +39,7 @@ export function App({ eventSource }: AppProps) {
     try {
       const applyEvents = (events: Parameters<typeof reduceWriterRoomEvents>[1]) => {
         setState((current) => reduceWriterRoomEvents(current, events));
+        voice.observeEvents(events);
       };
       if (source.mode === "backend") {
         await source.sendMessage(message, applyEvents);
@@ -44,6 +47,7 @@ export function App({ eventSource }: AppProps) {
         applyEvents(await source.sendMessage(message));
       }
     } catch (caught) {
+      voice.handleTurnError();
       setError(caught instanceof Error ? caught.message : "Stewart could not process the message.");
     } finally {
       setBusy(false);
@@ -55,6 +59,10 @@ export function App({ eventSource }: AppProps) {
     try {
       const events = await source.advance();
       setState((current) => reduceWriterRoomEvents(current, events));
+      voice.observeEvents(events);
+    } catch (caught) {
+      voice.handleTurnError();
+      setError(caught instanceof Error ? caught.message : "Stewart could not process the message.");
     } finally {
       setBusy(false);
     }
@@ -90,7 +98,21 @@ export function App({ eventSource }: AppProps) {
             discovery, implications, and informed paths forward.
           </p>
           <div className="entry-composer">
-            <PromptComposer onSubmit={sendMessage} disabled={busy} initial />
+            <ConversationComposer
+              onSubmit={sendMessage}
+              disabled={busy}
+              initial
+              mode={voice.mode}
+              voiceAvailable={voice.available}
+              voiceState={voice.state}
+              voiceError={voice.error}
+              finalTranscript={voice.finalTranscript}
+              interimTranscript={voice.interimTranscript}
+              analyser={voice.analyser}
+              onModeChange={voice.setMode}
+              onToggleListening={voice.toggleListening}
+              onClearTranscript={voice.clearTranscript}
+            />
             {fixtureMode && !eventSource && (
               <label className="clarification-toggle">
                 <input
@@ -127,6 +149,16 @@ export function App({ eventSource }: AppProps) {
                   messages={state.messages}
                   onSubmit={sendMessage}
                   busy={busy}
+                  mode={voice.mode}
+                  voiceAvailable={voice.available}
+                  voiceState={voice.state}
+                  voiceError={voice.error}
+                  finalTranscript={voice.finalTranscript}
+                  interimTranscript={voice.interimTranscript}
+                  analyser={voice.analyser}
+                  onModeChange={voice.setMode}
+                  onToggleListening={voice.toggleListening}
+                  onClearTranscript={voice.clearTranscript}
                 />
               </aside>
 
