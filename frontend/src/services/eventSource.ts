@@ -6,6 +6,7 @@ export type WriterRoomEventListener = (events: WriterRoomEventBatch) => void;
 export interface WriterRoomEventSource {
   readonly mode: "fixture" | "backend";
   readonly canAdvance: boolean;
+  getSpeechAudio?(text: string, signal?: AbortSignal): Promise<Blob>;
   sendMessage(
     message: string,
     onEvents?: WriterRoomEventListener,
@@ -121,6 +122,25 @@ export class BackendEventSource implements WriterRoomEventSource {
     }
     processLine(buffer);
     return collected;
+  }
+
+  async getSpeechAudio(text: string, signal?: AbortSignal): Promise<Blob> {
+    const conversationId = await this.ensureConversation();
+    const response = await transportFetch(`/api/conversations/${conversationId}/speech`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal,
+    });
+    if (!response.ok) throw await responseError(response);
+    if (!response.headers.get("Content-Type")?.toLowerCase().startsWith("audio/mpeg")) {
+      throw new Error("Stewart's hosted voice returned unusable audio.");
+    }
+    const audio = await response.blob();
+    if (audio.size === 0) {
+      throw new Error("Stewart's hosted voice returned unusable audio.");
+    }
+    return audio;
   }
 
   async advance(): Promise<WriterRoomEventBatch> {

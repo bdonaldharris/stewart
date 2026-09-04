@@ -1,16 +1,17 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ConversationPanel, PromptComposer } from "./components/ConversationPanel";
+import { ConversationComposer, ConversationPanel } from "./components/ConversationPanel";
 import { Header } from "./components/Header";
 import { InvestigationWorkspace } from "./components/InvestigationWorkspace";
 import { ReturnedInvestigations } from "./components/ReturnedInvestigations";
 import { StewardshipReport } from "./components/StewardshipReport";
-import { agentIds } from "./model/events";
+import { agentIds, type WriterRoomEvent, type WriterRoomEventBatch } from "./model/events";
 import { createInitialState, reduceWriterRoomEvents } from "./model/state";
 import {
   createConfiguredEventSource,
   type WriterRoomEventSource,
 } from "./services/eventSource";
+import { useVoiceMode } from "./voice/useVoiceMode";
 
 interface AppProps {
   eventSource?: WriterRoomEventSource;
@@ -18,12 +19,28 @@ interface AppProps {
 
 export function App({ eventSource }: AppProps) {
   const [state, setState] = useState(createInitialState);
+  const stateRef = useRef(state);
   const [source, setSource] = useState<WriterRoomEventSource>(
     () => eventSource ?? createConfiguredEventSource(),
   );
   const [clarificationDemo, setClarificationDemo] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [speechRevision, setSpeechRevision] = useState(0);
+  const requestHostedSpeech = useCallback(
+    (text: string, signal: AbortSignal) => {
+      const request = source.getSpeechAudio;
+      return request
+        ? request.call(source, text, signal)
+        : Promise.reject(new Error("Hosted speech is unavailable."));
+    },
+    [source],
+  );
+  const voice = useVoiceMode(source.getSpeechAudio ? requestHostedSpeech : undefined);
+  const prepareVoiceEvents = voice.prepareEvents;
+  const pendingSpeechEventsRef = useRef<WriterRoomEventBatch[]>([]);
+  const pendingFinalEventsRef = useRef<WriterRoomEvent[]>([]);
+  const impactCompletionCommittedRef = useRef(false);
 
   const fixtureMode = source.mode === "fixture";
   const specialistsInWorkspace = agentIds.some((agent) => {
@@ -31,21 +48,84 @@ export function App({ eventSource }: AppProps) {
     return status !== "complete" && status !== "idle";
   });
 
+  const applyEventsNow = useCallback(
+    (events: WriterRoomEventBatch) => {
+      if (events.length === 0) return;
+      prepareVoiceEvents(events);
+      stateRef.current = reduceWriterRoomEvents(stateRef.current, events);
+      setState(stateRef.current);
+      pendingSpeechEventsRef.current.push(events);
+      setSpeechRevision((revision) => revision + 1);
+    },
+    [prepareVoiceEvents],
+  );
+
+  function applyEvents(events: WriterRoomEventBatch) {
+    for (const event of events) {
+      if (event.type === "investigation_started") {
+        impactCompletionCommittedRef.current = false;
+      }
+
+      const investigationInProgress = stateRef.current.phase === "investigation";
+      const deferFinalMessage =
+        event.type === "stewart_message" &&
+        !event.message.needsWriterInput &&
+        investigationInProgress &&
+        !impactCompletionCommittedRef.current;
+      const deferReport =
+        event.type === "report_ready" &&
+        investigationInProgress &&
+        !impactCompletionCommittedRef.current;
+
+      if (deferFinalMessage || deferReport) {
+        pendingFinalEventsRef.current.push(event);
+        if (deferReport && stateRef.current.agents.impact.status !== "complete") {
+          applyEventsNow([
+            {
+              type: "specialist_status",
+              agent: "impact",
+              status: "complete",
+              activity: "Complete",
+            },
+          ]);
+        }
+        continue;
+      }
+
+      applyEventsNow([event]);
+    }
+  }
+
+  useEffect(() => {
+    const batches = pendingSpeechEventsRef.current.splice(0);
+    batches.forEach(voice.observeEvents);
+  }, [speechRevision, voice.observeEvents]);
+
+  useEffect(() => {
+    const impactComplete = state.agents.impact.status === "complete";
+    impactCompletionCommittedRef.current = impactComplete;
+    if (!impactComplete || pendingFinalEventsRef.current.length === 0) return;
+    const pendingFinalEvents = pendingFinalEventsRef.current.splice(0);
+    applyEventsNow(pendingFinalEvents);
+  }, [applyEventsNow, state.agents.impact.status]);
+
   async function sendMessage(message: string) {
+    if (stateRef.current.phase === "entry") voice.beginInitialTransition();
     setBusy(true);
     setError(undefined);
     try {
-      const applyEvents = (events: Parameters<typeof reduceWriterRoomEvents>[1]) => {
-        setState((current) => reduceWriterRoomEvents(current, events));
-      };
       if (source.mode === "backend") {
         await source.sendMessage(message, applyEvents);
       } else {
         applyEvents(await source.sendMessage(message));
       }
     } catch (caught) {
+      pendingSpeechEventsRef.current.length = 0;
+      pendingFinalEventsRef.current.length = 0;
+      voice.handleTurnError();
       setError(caught instanceof Error ? caught.message : "Stewart could not process the message.");
     } finally {
+      voice.completeTurn();
       setBusy(false);
     }
   }
@@ -54,7 +134,12 @@ export function App({ eventSource }: AppProps) {
     setBusy(true);
     try {
       const events = await source.advance();
-      setState((current) => reduceWriterRoomEvents(current, events));
+      applyEvents(events);
+    } catch (caught) {
+      pendingSpeechEventsRef.current.length = 0;
+      pendingFinalEventsRef.current.length = 0;
+      voice.handleTurnError();
+      setError(caught instanceof Error ? caught.message : "Stewart could not process the message.");
     } finally {
       setBusy(false);
     }
@@ -76,7 +161,7 @@ export function App({ eventSource }: AppProps) {
         </div>
       )}
 
-      {state.phase === "entry" ? (
+      {state.phase === "entry" || voice.workspaceTransitionPending ? (
         <main className="entry-stage">
           <div className="entry-kicker">
             <span aria-hidden="true" />
@@ -90,7 +175,21 @@ export function App({ eventSource }: AppProps) {
             discovery, implications, and informed paths forward.
           </p>
           <div className="entry-composer">
-            <PromptComposer onSubmit={sendMessage} disabled={busy} initial />
+            <ConversationComposer
+              onSubmit={sendMessage}
+              disabled={busy}
+              initial
+              mode={voice.mode}
+              voiceAvailable={voice.available}
+              voiceState={voice.state}
+              voiceError={voice.error}
+              finalTranscript={voice.finalTranscript}
+              interimTranscript={voice.interimTranscript}
+              analyser={voice.analyser}
+              onModeChange={voice.setMode}
+              onToggleListening={voice.toggleListening}
+              onClearTranscript={voice.clearTranscript}
+            />
             {fixtureMode && !eventSource && (
               <label className="clarification-toggle">
                 <input
@@ -127,6 +226,16 @@ export function App({ eventSource }: AppProps) {
                   messages={state.messages}
                   onSubmit={sendMessage}
                   busy={busy}
+                  mode={voice.mode}
+                  voiceAvailable={voice.available}
+                  voiceState={voice.state}
+                  voiceError={voice.error}
+                  finalTranscript={voice.finalTranscript}
+                  interimTranscript={voice.interimTranscript}
+                  analyser={voice.analyser}
+                  onModeChange={voice.setMode}
+                  onToggleListening={voice.toggleListening}
+                  onClearTranscript={voice.clearTranscript}
                 />
               </aside>
 

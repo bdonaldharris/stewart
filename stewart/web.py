@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from google.adk.events import Event
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,12 +40,21 @@ from stewart.runtime import (
     RuntimeEventObserver,
     StewartConversation,
 )
+from stewart.speech import (
+    FIXED_LIFECYCLE_PHRASES,
+    MAX_SPEECH_CHARACTERS,
+    STEWART_AUDIO_CONTENT_TYPE,
+    SpeechFailureKind,
+    SpeechProviderError,
+    StewartSpeechSynthesizer,
+)
 
 logger = logging.getLogger(__name__)
 
 SAFE_RUNTIME_ERROR = (
     "Stewart could not complete this turn. Check the server configuration and try again."
 )
+SAFE_SPEECH_ERROR = "Stewart's hosted voice is temporarily unavailable."
 COMPLETION_MESSAGE = SYNTHESIS_COMPLETE_RESPONSE
 
 _AGENT_BY_TOOL = {
@@ -80,10 +89,19 @@ class WriterMessageRequest(BaseModel):
     message: str = Field(min_length=1, max_length=20_000)
 
 
+class SpeechRequest(BaseModel):
+    """One exact, conversation-authorized Stewart utterance."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=MAX_SPEECH_CHARACTERS)
+
+
 @dataclass
 class _BrowserSession:
     conversation: StewartConversation
     lock: asyncio.Lock
+    authorized_speech: set[str]
 
 
 class BrowserConversationRegistry:
@@ -102,11 +120,24 @@ class BrowserConversationRegistry:
         self._sessions[conversation_id] = _BrowserSession(
             conversation=conversation,
             lock=asyncio.Lock(),
+            authorized_speech=set(),
         )
         return conversation_id
 
     def get(self, conversation_id: str) -> _BrowserSession | None:
         return self._sessions.get(conversation_id)
+
+    def authorize_stewart_speech(self, conversation_id: str, text: str) -> None:
+        session = self.get(conversation_id)
+        if session is None:
+            raise KeyError(conversation_id)
+        session.authorized_speech.add(text)
+
+    def is_speech_authorized(self, conversation_id: str, text: str) -> bool:
+        session = self.get(conversation_id)
+        if session is None:
+            return False
+        return text in FIXED_LIFECYCLE_PHRASES or text in session.authorized_speech
 
     async def send(
         self,
@@ -337,10 +368,16 @@ def _ndjson(payload: BrowserEvent) -> str:
     return json.dumps(payload, separators=(",", ":")) + "\n"
 
 
-def create_app(registry: BrowserConversationRegistry | None = None) -> FastAPI:
+def create_app(
+    registry: BrowserConversationRegistry | None = None,
+    speech: StewartSpeechSynthesizer | None = None,
+) -> FastAPI:
     """Create the local-only HTTP transport with injectable in-memory sessions."""
     app = FastAPI(title="Stewart Writer's Room transport")
     sessions = registry or BrowserConversationRegistry()
+    speech_synthesizer = speech or StewartSpeechSynthesizer()
+
+    app.router.add_event_handler("shutdown", speech_synthesizer.close)
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
@@ -389,6 +426,11 @@ def create_app(registry: BrowserConversationRegistry | None = None) -> FastAPI:
                         on_event=observe,
                     )
                     for browser_event in mapper.from_run_result(result):
+                        if browser_event["type"] == "stewart_message":
+                            sessions.authorize_stewart_speech(
+                                conversation_id,
+                                browser_event["message"]["text"],
+                            )
                         await queue.put(browser_event)
                 except Exception as error:
                     logger.error("Writer turn failed: %s", type(error).__name__)
@@ -409,6 +451,33 @@ def create_app(registry: BrowserConversationRegistry | None = None) -> FastAPI:
                     task.cancel()
 
         return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+    @app.post("/api/conversations/{conversation_id}/speech")
+    async def synthesize_speech(
+        conversation_id: str,
+        request: SpeechRequest,
+    ) -> Response:
+        if sessions.get(conversation_id) is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        if not request.text.strip():
+            raise HTTPException(status_code=422, detail="Non-empty speech text is required")
+        if not sessions.is_speech_authorized(conversation_id, request.text):
+            raise HTTPException(
+                status_code=403,
+                detail="Speech text is not authorized for this conversation",
+            )
+        try:
+            audio = await speech_synthesizer.synthesize(request.text)
+        except SpeechProviderError as error:
+            logger.warning("Hosted speech failed: %s", error.kind.value)
+            status_code = {
+                SpeechFailureKind.QUOTA: 429,
+                SpeechFailureKind.TIMEOUT: 504,
+                SpeechFailureKind.PERMISSION: 503,
+                SpeechFailureKind.UNAVAILABLE: 503,
+            }[error.kind]
+            raise HTTPException(status_code=status_code, detail=SAFE_SPEECH_ERROR) from error
+        return Response(content=audio, media_type=STEWART_AUDIO_CONTENT_TYPE)
 
     return app
 
