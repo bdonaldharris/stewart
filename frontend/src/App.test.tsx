@@ -198,7 +198,7 @@ describe("Writer's Room", () => {
     expect(screen.queryByRole("button", { name: "Continue investigation" })).not.toBeInTheDocument();
   });
 
-  it("omits an option description when the live contract has no distinct description", () => {
+  it("omits empty optional report sections and an absent option description", () => {
     const { container } = render(
       <StewardshipReport
         report={{
@@ -218,6 +218,8 @@ describe("Writer's Room", () => {
     );
 
     expect(container.querySelector(".option-description")).toBeNull();
+    expect(screen.queryByText("Opportunities")).not.toBeInTheDocument();
+    expect(screen.queryByText("Audience Considerations")).not.toBeInTheDocument();
     expect(screen.getByText("Use a supporting role")).toBeInTheDocument();
   });
 });

@@ -43,14 +43,18 @@ export function StewardshipReport({ report }: StewardshipReportProps) {
           <p className="eyebrow">Continuity Considerations</p>
           <ReportList items={report.continuityConsiderations} />
         </section>
-        <section className="report-section">
-          <p className="eyebrow">Opportunities</p>
-          <ReportList items={report.opportunities} />
-        </section>
-        <section className="report-section">
-          <p className="eyebrow">Audience Considerations</p>
-          <ReportList items={report.audienceConsiderations} />
-        </section>
+        {report.opportunities.length > 0 && (
+          <section className="report-section">
+            <p className="eyebrow">Opportunities</p>
+            <ReportList items={report.opportunities} />
+          </section>
+        )}
+        {report.audienceConsiderations.length > 0 && (
+          <section className="report-section">
+            <p className="eyebrow">Audience Considerations</p>
+            <ReportList items={report.audienceConsiderations} />
+          </section>
+        )}
       </div>
 
       <section className="report-options">

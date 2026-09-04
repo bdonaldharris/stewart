@@ -310,6 +310,9 @@ def test_mapper_emits_real_activity_clarification_impact_and_report_events() -> 
     assert impact_events[-1]["result"]["risks"] == [
         "The new mechanic could resolve conflict too easily."
     ]
+    assert impact_events[-1]["result"]["audienceConsiderations"] == [
+        "The mechanic needs consistent rules."
+    ]
     assert run_events[0]["type"] == "stewart_message"
     assert run_events[0]["message"]["text"] == COMPLETION_MESSAGE
     assert run_events[0]["message"]["needsWriterInput"] is False
@@ -329,6 +332,29 @@ def test_mapper_emits_real_activity_clarification_impact_and_report_events() -> 
     )
     assert run_events[1]["report"]["options"][0]["description"]
     assert "affectedAreas" not in run_events[1]["report"]
+
+
+def test_mapper_normalizes_meaningful_report_markdown_without_empty_bullets() -> None:
+    report = _stewardship_report().model_copy(
+        update={
+            "opportunities": [],
+            "audience_considerations": ["**Audience trust** requires clear setup."],
+        }
+    )
+
+    events = BrowserEventMapper().from_run_result(
+        _result(
+            response="Synthesis complete.",
+            next_step=StewartNextStep.SYNTHESIZE,
+            specialist_results={IMPACT_OUTPUT_KEY: _impact_result()},
+            stewardship_report=report,
+        )
+    )
+
+    mapped_report = events[1]["report"]
+    assert mapped_report["opportunities"] == []
+    assert mapped_report["audienceConsiderations"] == ["Audience trust requires clear setup."]
+    assert "-" not in mapped_report["audienceConsiderations"]
 
 
 def test_mapper_normalizes_stewarts_actual_clarification_response_for_display() -> None:

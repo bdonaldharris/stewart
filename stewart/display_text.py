@@ -13,6 +13,7 @@ _BOLD_UNDERSCORES = re.compile(r"__(?=\S)(.+?)(?<=\S)__")
 _ITALIC_ASTERISKS = re.compile(r"(?<!\*)\*(?=\S)(.+?)(?<=\S)\*(?!\*)")
 _ITALIC_UNDERSCORES = re.compile(r"(?<!\w)_(?=\S)(.+?)(?<=\S)_(?!\w)")
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")
+_FORMATTING_ONLY = re.compile(r"^(?:[#*_`~>|+\-\s]+|\d+[.)])$")
 
 
 def _decode_percent_encoded_unicode(value: str) -> str:
@@ -45,5 +46,7 @@ def normalize_display_text(value: str) -> str:
         line = _ITALIC_ASTERISKS.sub(r"\1", line)
         line = _ITALIC_UNDERSCORES.sub(r"\1", line)
         line = _INLINE_CODE.sub(r"\1", line)
+        if _FORMATTING_ONLY.fullmatch(line):
+            continue
         normalized_lines.append(line)
     return "\n".join(normalized_lines).strip()

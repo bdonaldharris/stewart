@@ -16,3 +16,10 @@ def test_normalize_display_text_preserves_legitimate_percent_signs_and_ascii_esc
     value = "Confidence is 50%; keep the literal token %25 and invalid UTF-8 %C3."
 
     assert normalize_display_text(value) == value
+
+
+def test_normalize_display_text_removes_formatting_only_lines() -> None:
+    assert normalize_display_text("-\n***\n___\n###\n1.") == ""
+    assert normalize_display_text("- **Audience trust** requires clear setup.") == (
+        "- Audience trust requires clear setup."
+    )

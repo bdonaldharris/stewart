@@ -173,3 +173,37 @@ def test_stewardship_report_contract_is_decision_oriented_without_affected_areas
     }
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         StewardshipReport.model_validate(payload_with_affected_areas)
+
+
+@pytest.mark.parametrize("invalid_item", ["", "   ", "-", "***", "###", "1."])
+def test_stewardship_report_rejects_effectively_empty_audience_items(
+    invalid_item: str,
+) -> None:
+    payload = {
+        **_stewardship_report_payload(),
+        "audience_considerations": [invalid_item],
+    }
+
+    with pytest.raises(ValidationError):
+        StewardshipReport.model_validate(payload)
+
+
+def test_stewardship_report_accepts_meaningful_markdown_and_empty_optional_sections() -> None:
+    payload = {
+        **_stewardship_report_payload(),
+        "opportunities": [],
+        "audience_considerations": ["**Audience trust** depends on clear setup."],
+    }
+
+    report = StewardshipReport.model_validate(payload)
+
+    assert report.opportunities == []
+    assert report.audience_considerations == ["**Audience trust** depends on clear setup."]
+
+
+def test_stewardship_report_rejects_formatting_only_option_items() -> None:
+    payload = _stewardship_report_payload()
+    payload["options"][0]["benefits"] = ["-"]
+
+    with pytest.raises(ValidationError, match="meaningful display text"):
+        StewardshipReport.model_validate(payload)

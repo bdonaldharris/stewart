@@ -117,6 +117,9 @@ decision-support synthesis, not another investigation artifact:
   often useful, but follow the evidence rather than an artificial count.
 - Select and synthesize the most decision-relevant opportunities and audience
   implications. Do not copy Impact's complete lists.
+- Every included string and list item must contain meaningful prose. Never use
+  `-` or another formatting-only placeholder. Leave optional opportunities or
+  audience considerations empty when none materially affect the decision.
 - Consolidate redundant approaches into meaningful decision paths. Give each
   option a distinct description that connects it to the central tension, plus
   the material benefits and sacrifices. Do not choose for the writer.
