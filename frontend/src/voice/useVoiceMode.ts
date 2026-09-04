@@ -132,6 +132,7 @@ export function useVoiceMode(): VoiceModeController {
       modeRef.current = next;
       setModeState(next);
       if (next === "voice") {
+        ensureSpeechQueue();
         setError(undefined);
         updateState("ready");
       }
@@ -139,6 +140,7 @@ export function useVoiceMode(): VoiceModeController {
     [
       cancelVoiceOutput,
       capabilities.available,
+      ensureSpeechQueue,
       releaseWorkspaceTransition,
       stopRecognition,
       updateState,

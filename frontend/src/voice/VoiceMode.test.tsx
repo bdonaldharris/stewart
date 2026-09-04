@@ -285,6 +285,7 @@ describe("Writer's Room Voice Mode", () => {
     render(<App eventSource={source} />);
 
     await user.click(screen.getByRole("radio", { name: "Voice" }));
+    expect(mocks.speechSynthesis.getVoices).toHaveBeenCalled();
     expect(
       screen.getByText(/Voice recognition is provided by your browser and may use its speech service/),
     ).toBeInTheDocument();

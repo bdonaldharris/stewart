@@ -45,6 +45,9 @@ function createSpeechHarness(
     utterances,
     speak,
     cancel,
+    replaceVoices(next: SpeechSynthesisVoice[]) {
+      voices = next;
+    },
     setVoices(next: SpeechSynthesisVoice[]) {
       voices = next;
       synthesis.dispatchEvent(new Event("voiceschanged"));
@@ -146,12 +149,27 @@ describe("voice announcement mapping", () => {
 });
 
 describe("Stewart voice selection", () => {
+  it("matches clear male voices available in the local macOS catalog", () => {
+    const defaultVoice = voice("Samantha", "en-US", true);
+    const reedVoice = voice("Reed (English (US))", "en-US");
+    const eddyVoice = voice("Eddy (English (UK))", "en-GB");
+
+    expect(selectStewartVoice([defaultVoice, eddyVoice, reedVoice])).toBe(reedVoice);
+  });
+
   it("prefers a clear male English voice without letting an unwanted male voice outrank it", () => {
     const unwantedMaleVoice = voice("Albert", "en-US");
     const defaultVoice = voice("Samantha", "en-US", true);
     const maleVoice = voice("Daniel", "en-GB");
 
     expect(selectStewartVoice([unwantedMaleVoice, defaultVoice, maleVoice])).toBe(maleVoice);
+  });
+
+  it("recognizes a preferred male candidate inside a browser-prefixed name", () => {
+    const defaultVoice = voice("Samantha", "en-US", true);
+    const maleVoice = voice("Google Daniel (English United Kingdom)", "en-GB");
+
+    expect(selectStewartVoice([defaultVoice, maleVoice])).toBe(maleVoice);
   });
 
   it("falls back to an English voice when no preferred male voice is identifiable", () => {
@@ -191,6 +209,37 @@ describe("Stewart voice selection", () => {
     harness.utterances[0].onend?.();
 
     expect(harness.utterances[1].voice).toBe(maleVoice);
+  });
+
+  it("uses a male voice delivered by voiceschanged before the first utterance", () => {
+    const harness = createSpeechHarness([]);
+    const queue = new BrowserSpeechQueue({
+      synthesis: harness.synthesis,
+      utterance: MockUtterance as unknown as typeof SpeechSynthesisUtterance,
+      onSpeakingChange: vi.fn(),
+    });
+    const maleVoice = voice("Daniel", "en-GB");
+
+    harness.setVoices([voice("Samantha", "en-US", true), maleVoice]);
+    queue.enqueue([{ id: "initial", text: "Initial response." }]);
+
+    expect(harness.utterances[0].voice).toBe(maleVoice);
+    expect(harness.utterances[0].lang).toBe("en-GB");
+  });
+
+  it("rechecks Chrome's voice list immediately before the first unpinned utterance", () => {
+    const harness = createSpeechHarness([]);
+    const queue = new BrowserSpeechQueue({
+      synthesis: harness.synthesis,
+      utterance: MockUtterance as unknown as typeof SpeechSynthesisUtterance,
+      onSpeakingChange: vi.fn(),
+    });
+    const maleVoice = voice("Reed (English (US))", "en-US");
+
+    harness.replaceVoices([voice("Samantha", "en-US", true), maleVoice]);
+    queue.enqueue([{ id: "initial", text: "Initial response." }]);
+
+    expect(harness.utterances[0].voice).toBe(maleVoice);
   });
 
   it("pins one voice across conversation, clarification, and lifecycle speech", () => {

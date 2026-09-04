@@ -137,15 +137,17 @@ interface SpeechQueueOptions {
 }
 
 const PREFERRED_CLEAR_MALE_VOICE_NAMES = [
-  "alex",
   "daniel",
   "reed",
+  "eddy",
+  "aman",
+  "rishi",
+  "alex",
   "google uk english male",
   "microsoft david",
   "microsoft guy",
   "microsoft mark",
   "microsoft ryan",
-  "eddy",
 ];
 const PREFERRED_CLEAR_ENGLISH_VOICE_NAMES = [
   "samantha",
@@ -182,8 +184,13 @@ function isEnglishVoice(voice: SpeechSynthesisVoice): boolean {
 }
 
 function nameMatches(voice: SpeechSynthesisVoice, candidate: string): boolean {
-  const name = voice.name.toLowerCase();
-  return name === candidate || name.startsWith(`${candidate} `);
+  const normalizedName = normalizeVoiceName(voice.name);
+  const normalizedCandidate = normalizeVoiceName(candidate);
+  return ` ${normalizedName} `.includes(` ${normalizedCandidate} `);
+}
+
+function normalizeVoiceName(name: string): string {
+  return name.toLowerCase().replaceAll(/[^a-z0-9]+/g, " ").trim();
 }
 
 function preferredVoice(
@@ -272,9 +279,10 @@ export class BrowserSpeechQueue {
     this.current = next;
     const generation = this.generation;
     try {
+      if (!this.voicePinned) this.refreshVoice();
       const utterance = new this.options.utterance(next.text);
-      utterance.lang = "en-US";
       this.currentVoice = this.voicePinned ? this.pinnedVoice : this.selectedVoice;
+      utterance.lang = this.currentVoice?.lang || "en-US";
       utterance.voice = this.currentVoice;
       utterance.onend = () => this.finish(generation, "completed");
       utterance.onerror = () => this.finish(generation, "error");
