@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -81,6 +81,40 @@ class RecordingSource implements WriterRoomEventSource {
   }
 }
 
+class StreamingSource implements WriterRoomEventSource {
+  readonly mode = "backend" as const;
+  readonly canAdvance = false;
+  readonly sent: string[] = [];
+  private listener?: (events: WriterRoomEventBatch) => void;
+  private finishTurn?: (events: WriterRoomEventBatch) => void;
+
+  sendMessage(value: string, onEvents?: (events: WriterRoomEventBatch) => void) {
+    this.sent.push(value);
+    this.listener = onEvents;
+    onEvents?.([
+      {
+        type: "writer_message",
+        message: message(`writer-${this.sent.length}`, "writer", value),
+      },
+    ]);
+    return new Promise<WriterRoomEventBatch>((resolve) => {
+      this.finishTurn = resolve;
+    });
+  }
+
+  emit(events: WriterRoomEventBatch) {
+    this.listener?.(events);
+  }
+
+  finish() {
+    this.finishTurn?.([]);
+  }
+
+  async advance(): Promise<WriterRoomEventBatch> {
+    return [];
+  }
+}
+
 interface BrowserMocks {
   getUserMedia: ReturnType<typeof vi.fn>;
   speechSynthesis: {
@@ -90,6 +124,7 @@ interface BrowserMocks {
   };
   trackStop: ReturnType<typeof vi.fn>;
   analyserRead: ReturnType<typeof vi.fn>;
+  utterances: MockUtterance[];
   runAnimationFrame(): void;
 }
 
@@ -187,8 +222,23 @@ function installBrowserMocks(options: { permissionDenied?: boolean } = {}): Brow
     speechSynthesis,
     trackStop,
     analyserRead,
+    utterances,
     runAnimationFrame: () => animationFrame?.(0),
   };
+}
+
+async function submitVoiceProposal(
+  user: ReturnType<typeof userEvent.setup>,
+  transcript: string,
+) {
+  await user.click(screen.getByRole("radio", { name: "Voice" }));
+  await user.click(screen.getByRole("button", { name: "Start listening" }));
+  const recognition = MockRecognition.instances.at(-1);
+  if (!recognition) throw new Error("Recognition did not start");
+  act(() => recognition.result(transcript, true));
+  await user.click(screen.getByRole("button", { name: "Stop listening" }));
+  act(() => recognition.end());
+  await user.click(screen.getByRole("button", { name: "Send transcript to Stewart" }));
 }
 
 afterEach(() => {
@@ -327,6 +377,165 @@ describe("Writer's Room Voice Mode", () => {
     await user.click(screen.getByRole("radio", { name: "Text" }));
     expect(mocks.speechSynthesis.cancel).toHaveBeenCalledTimes(2);
     expect(screen.getByText("A new Stewart response.")).toBeInTheDocument();
+  });
+
+  it("keeps the initial page visible until deterministic coordination speech completes", async () => {
+    const mocks = installBrowserMocks();
+    const source = new StreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await submitVoiceProposal(user, "A proposal for the investigation");
+    expect(source.sent).toEqual(["A proposal for the investigation"]);
+    expect(
+      screen.getByRole("heading", { name: "Bring the idea. Stewart will map what it touches." }),
+    ).toBeInTheDocument();
+
+    act(() =>
+      source.emit([
+        {
+          type: "stewart_message",
+          message: message(
+            "coordination",
+            "stewart",
+            "I’m coordinating Lore, Timeline, and Relationship now.",
+          ),
+        },
+        { type: "investigation_started" },
+        {
+          type: "specialist_status",
+          agent: "lore",
+          status: "active",
+          activity: "Searching sources",
+        },
+      ]),
+    );
+
+    await waitFor(() => expect(mocks.speechSynthesis.speak).toHaveBeenCalledOnce());
+    expect(mocks.utterances[0].text).toBe(
+      "I'm sending your proposal to the investigation team.",
+    );
+    expect(
+      screen.getByRole("heading", { name: "Bring the idea. Stewart will map what it touches." }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Specialist Workspace" }),
+    ).not.toBeInTheDocument();
+
+    act(() => mocks.utterances[0].onend?.());
+
+    expect(screen.getByRole("heading", { name: "Specialist Workspace" })).toBeInTheDocument();
+    expect(screen.getByTestId("agent-card-lore")).toHaveTextContent("Searching sources");
+    expect(mocks.utterances).toHaveLength(1);
+    act(() => source.finish());
+  });
+
+  it("releases the initial transition when coordination speech errors", async () => {
+    const mocks = installBrowserMocks();
+    const source = new StreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await submitVoiceProposal(user, "A proposal with a speech failure");
+    act(() => source.emit([{ type: "investigation_started" }]));
+    await waitFor(() => expect(mocks.utterances).toHaveLength(1));
+
+    act(() => mocks.utterances[0].onerror?.());
+
+    expect(screen.getByRole("heading", { name: "Specialist Workspace" })).toBeInTheDocument();
+    act(() => source.finish());
+  });
+
+  it("releases the initial transition and clears speech when switching to Text", async () => {
+    const mocks = installBrowserMocks();
+    const source = new StreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await submitVoiceProposal(user, "A proposal cancelled into Text mode");
+    act(() => source.emit([{ type: "investigation_started" }]));
+    await waitFor(() => expect(mocks.utterances).toHaveLength(1));
+
+    await user.click(screen.getByRole("radio", { name: "Text" }));
+
+    expect(mocks.speechSynthesis.cancel).toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Specialist Workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Text" })).toHaveAttribute("aria-checked", "true");
+    act(() => source.finish());
+  });
+
+  it("commits Impact completion before presenting and speaking final synthesis", async () => {
+    const mocks = installBrowserMocks();
+    const source = new StreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await submitVoiceProposal(user, "A proposal with meaningful impact");
+    act(() =>
+      source.emit([
+        { type: "investigation_started" },
+        {
+          type: "specialist_status",
+          agent: "impact",
+          status: "active",
+          activity: "Analyzing implications",
+        },
+      ]),
+    );
+    await waitFor(() => expect(mocks.utterances).toHaveLength(1));
+    act(() => mocks.utterances[0].onend?.());
+    expect(screen.getByTestId("agent-card-impact")).toHaveAttribute("data-status", "active");
+
+    const finalMessage = "The investigation is complete. I’ve prepared the Stewardship Report.";
+    act(() =>
+      source.emit([
+        {
+          type: "stewart_message",
+          message: message("final", "stewart", finalMessage),
+        },
+      ]),
+    );
+    expect(screen.queryByText(finalMessage)).not.toBeInTheDocument();
+    expect(mocks.utterances).toHaveLength(1);
+
+    act(() =>
+      source.emit([
+        {
+          type: "impact_completed",
+          result: {
+            summary: "Impact is complete.",
+            risks: [],
+            opportunities: [],
+            affectedAreas: [],
+            futureImplications: [],
+            audienceConsiderations: [],
+            tradeoffs: [],
+            assumptions: [],
+          },
+        },
+        {
+          type: "report_ready",
+          report: {
+            assessment: "A concise assessment.",
+            continuityConsiderations: [],
+            opportunities: [],
+            audienceConsiderations: [],
+            options: [],
+          },
+        },
+      ]),
+    );
+
+    expect(await screen.findByText(finalMessage)).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-card-impact")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Stewardship Report" })).toBeInTheDocument();
+    await waitFor(() => expect(mocks.utterances).toHaveLength(2));
+    expect(mocks.utterances[1].text).toBe("Impact investigation complete.");
+
+    act(() => mocks.utterances[1].onend?.());
+
+    expect(mocks.utterances[2].text).toBe(finalMessage);
+    act(() => source.finish());
   });
 
   it("keeps Text usable after permission denial", async () => {

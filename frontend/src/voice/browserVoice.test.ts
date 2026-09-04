@@ -117,7 +117,7 @@ describe("voice announcement mapping", () => {
     ];
 
     expect(mapper.map(events).map((item) => item.text)).toEqual([
-      "I’m sending your proposal to the investigation team.",
+      "I'm sending your proposal to the investigation team.",
       "Lore investigation complete.",
       "Timeline investigation complete.",
       "Relationship investigation complete.",
@@ -126,7 +126,7 @@ describe("voice announcement mapping", () => {
     ]);
   });
 
-  it("uses a fixture coordination message instead of duplicate start speech", () => {
+  it("replaces a fixture coordination message with one deterministic start speech", () => {
     const events: WriterRoomEventBatch = [
       {
         type: "stewart_message",
@@ -140,7 +140,7 @@ describe("voice announcement mapping", () => {
     ];
 
     expect(new VoiceAnnouncementMapper().map(events).map((item) => item.text)).toEqual([
-      "I’m coordinating Lore, Timeline, and Relationship now.",
+      "I'm sending your proposal to the investigation team.",
     ]);
   });
 });
@@ -193,7 +193,7 @@ describe("Stewart voice selection", () => {
     expect(harness.utterances[1].voice).toBe(maleVoice);
   });
 
-  it("applies the selected voice to conversation, clarification, and lifecycle speech", () => {
+  it("pins one voice across conversation, clarification, and lifecycle speech", () => {
     const maleVoice = voice("Google UK English Male", "en-GB");
     const harness = createSpeechHarness([maleVoice]);
     const queue = new BrowserSpeechQueue({
@@ -229,19 +229,67 @@ describe("Stewart voice selection", () => {
           assumptions: [],
         },
       },
+      {
+        type: "impact_completed",
+        result: {
+          summary: "Private impact",
+          risks: [],
+          opportunities: [],
+          affectedAreas: [],
+          futureImplications: [],
+          audienceConsiderations: [],
+          tradeoffs: [],
+          assumptions: [],
+        },
+      },
+      {
+        type: "stewart_message",
+        message: {
+          id: "final",
+          speaker: "stewart",
+          text: "The investigation is complete.",
+        },
+      },
     ];
 
     queue.enqueue(new VoiceAnnouncementMapper().map(events));
     expect(harness.utterances[0].voice).toBe(maleVoice);
+    harness.setVoices([voice("Samantha", "en-US", true)]);
     harness.utterances[0].onend?.();
-    expect(harness.utterances[1].voice).toBe(maleVoice);
-    harness.utterances[1].onend?.();
-    expect(harness.utterances[2].voice).toBe(maleVoice);
+    harness.setVoices([voice("Karen", "en-AU", true)]);
+    for (let index = 1; index < 4; index += 1) {
+      expect(harness.utterances[index].voice).toBe(maleVoice);
+      harness.utterances[index].onend?.();
+    }
+    expect(harness.utterances.every((utterance) => utterance.voice === maleVoice)).toBe(true);
     expect(harness.utterances.map((utterance) => utterance.text)).toEqual([
       "I can help investigate that proposal.",
       "Who is the falling out between?",
       "Lore investigation complete.",
+      "Impact investigation complete.",
+      "The investigation is complete.",
     ]);
+  });
+
+  it("falls back to the browser voice if a pinned voice later errors", () => {
+    const maleVoice = voice("Daniel", "en-GB");
+    const harness = createSpeechHarness([maleVoice]);
+    const queue = new BrowserSpeechQueue({
+      synthesis: harness.synthesis,
+      utterance: MockUtterance as unknown as typeof SpeechSynthesisUtterance,
+      onSpeakingChange: vi.fn(),
+    });
+
+    queue.enqueue([
+      { id: "first", text: "First response." },
+      { id: "second", text: "Second response." },
+      { id: "third", text: "Third response." },
+    ]);
+    harness.utterances[0].onend?.();
+    expect(harness.utterances[1].voice).toBe(maleVoice);
+    harness.utterances[1].onerror?.();
+
+    expect(harness.utterances[2].voice).toBeNull();
   });
 });
 
@@ -269,7 +317,7 @@ describe("investigation-start speech timing", () => {
 
     expect(harness.speak).toHaveBeenCalledOnce();
     expect(harness.utterances.map((utterance) => utterance.text)).toEqual([
-      "I’m coordinating Lore, Timeline, and Relationship now.",
+      "I'm sending your proposal to the investigation team.",
     ]);
   });
 

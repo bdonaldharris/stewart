@@ -24,10 +24,14 @@ export interface VoiceModeController {
   interimTranscript: string;
   error?: string;
   analyser?: AnalyserNode;
+  workspaceTransitionPending: boolean;
   setMode(mode: ConversationMode): void;
   toggleListening(): Promise<void>;
   clearTranscript(): void;
+  beginInitialTransition(): void;
+  prepareEvents(events: WriterRoomEventBatch): void;
   observeEvents(events: WriterRoomEventBatch): void;
+  completeTurn(): void;
   handleTurnError(): void;
 }
 
@@ -39,6 +43,7 @@ export function useVoiceMode(): VoiceModeController {
   const [interimTranscript, setInterimTranscript] = useState("");
   const [error, setError] = useState<string>();
   const [analyser, setAnalyser] = useState<AnalyserNode>();
+  const [workspaceTransitionPending, setWorkspaceTransitionPending] = useState(false);
 
   const modeRef = useRef<ConversationMode>("text");
   const stateRef = useRef<VoiceInteractionState>("ready");
@@ -51,10 +56,18 @@ export function useVoiceMode(): VoiceModeController {
   const recognitionFailedRef = useRef(false);
   const announcementMapperRef = useRef(new VoiceAnnouncementMapper());
   const speechQueueRef = useRef<BrowserSpeechQueue | undefined>(undefined);
+  const initialTransitionArmedRef = useRef(false);
+  const investigationBoundaryInFlightRef = useRef(false);
 
   const updateState = useCallback((next: VoiceInteractionState) => {
     stateRef.current = next;
     setState(next);
+  }, []);
+
+  const releaseWorkspaceTransition = useCallback(() => {
+    initialTransitionArmedRef.current = false;
+    investigationBoundaryInFlightRef.current = false;
+    setWorkspaceTransitionPending(false);
   }, []);
 
   const ensureSpeechQueue = useCallback((): BrowserSpeechQueue | undefined => {
@@ -68,10 +81,15 @@ export function useVoiceMode(): VoiceModeController {
           if (speaking) updateState("speaking");
           else if (stateRef.current === "speaking") updateState("ready");
         },
+        onItemSettled: (item) => {
+          if (item.presentationBoundary === "investigation-start") {
+            releaseWorkspaceTransition();
+          }
+        },
       });
     }
     return speechQueueRef.current;
-  }, [capabilities.available, updateState]);
+  }, [capabilities.available, releaseWorkspaceTransition, updateState]);
 
   const releaseMicrophone = useCallback(() => {
     audioSourceRef.current?.disconnect();
@@ -107,6 +125,7 @@ export function useVoiceMode(): VoiceModeController {
       if (next === "text") {
         cancelVoiceOutput();
         stopRecognition(true);
+        releaseWorkspaceTransition();
         setError(undefined);
         updateState("ready");
       }
@@ -117,7 +136,13 @@ export function useVoiceMode(): VoiceModeController {
         updateState("ready");
       }
     },
-    [cancelVoiceOutput, capabilities.available, stopRecognition, updateState],
+    [
+      cancelVoiceOutput,
+      capabilities.available,
+      releaseWorkspaceTransition,
+      stopRecognition,
+      updateState,
+    ],
   );
 
   const clearTranscript = useCallback(() => {
@@ -244,6 +269,35 @@ export function useVoiceMode(): VoiceModeController {
     await startListening();
   }, [startListening, stopRecognition, updateState]);
 
+  const beginInitialTransition = useCallback(() => {
+    if (modeRef.current !== "voice" || !capabilities.available) return;
+    initialTransitionArmedRef.current = true;
+    setWorkspaceTransitionPending(true);
+  }, [capabilities.available]);
+
+  const prepareEvents = useCallback(
+    (events: WriterRoomEventBatch) => {
+      if (modeRef.current !== "voice") return;
+      if (events.some((event) => event.type === "investigation_started")) {
+        if (initialTransitionArmedRef.current) {
+          initialTransitionArmedRef.current = false;
+          investigationBoundaryInFlightRef.current = true;
+        }
+        return;
+      }
+      if (
+        initialTransitionArmedRef.current &&
+        events.some(
+          (event) =>
+            event.type === "stewart_message" && Boolean(event.message.needsWriterInput),
+        )
+      ) {
+        releaseWorkspaceTransition();
+      }
+    },
+    [releaseWorkspaceTransition],
+  );
+
   const observeEvents = useCallback(
     (events: WriterRoomEventBatch) => {
       const speechItems = announcementMapperRef.current.map(events);
@@ -253,11 +307,19 @@ export function useVoiceMode(): VoiceModeController {
     [ensureSpeechQueue],
   );
 
+  const completeTurn = useCallback(() => {
+    if (initialTransitionArmedRef.current && !investigationBoundaryInFlightRef.current) {
+      releaseWorkspaceTransition();
+    }
+  }, [releaseWorkspaceTransition]);
+
   const handleTurnError = useCallback(() => {
-    if (modeRef.current !== "voice") return;
-    cancelVoiceOutput();
-    updateState("error");
-  }, [cancelVoiceOutput, updateState]);
+    releaseWorkspaceTransition();
+    if (modeRef.current === "voice") {
+      cancelVoiceOutput();
+      updateState("error");
+    }
+  }, [cancelVoiceOutput, releaseWorkspaceTransition, updateState]);
 
   useEffect(
     () => () => {
@@ -276,10 +338,14 @@ export function useVoiceMode(): VoiceModeController {
     interimTranscript,
     error,
     analyser,
+    workspaceTransitionPending,
     setMode,
     toggleListening,
     clearTranscript,
+    beginInitialTransition,
+    prepareEvents,
     observeEvents,
+    completeTurn,
     handleTurnError,
   };
 }

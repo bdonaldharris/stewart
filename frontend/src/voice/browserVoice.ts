@@ -6,7 +6,13 @@ export type VoiceInteractionState = "ready" | "listening" | "processing" | "spea
 export interface SpeechQueueItem {
   id: string;
   text: string;
+  presentationBoundary?: "investigation-start";
 }
+
+export type SpeechQueueSettlement = "completed" | "error" | "cancelled";
+
+export const INVESTIGATION_COORDINATION_SPEECH =
+  "I'm sending your proposal to the investigation team.";
 
 export interface BrowserSpeechRecognitionEvent extends Event {
   readonly resultIndex: number;
@@ -73,25 +79,16 @@ export class VoiceAnnouncementMapper {
 
   map(events: WriterRoomEventBatch): SpeechQueueItem[] {
     const items: SpeechQueueItem[] = [];
-    const investigationStartIndex = events.findIndex(
-      (event) => event.type === "investigation_started",
-    );
-    const batchHasCoordinationMessage =
-      investigationStartIndex >= 0 &&
-      events.some(
-        (event, index) => event.type === "stewart_message" && index < investigationStartIndex,
-      );
 
     for (const event of events) {
       switch (event.type) {
         case "investigation_started":
           this.investigationCycle += 1;
-          if (!batchHasCoordinationMessage) {
-            items.push({
-              id: `investigation-${this.investigationCycle}-started`,
-              text: "I’m sending your proposal to the investigation team.",
-            });
-          }
+          items.push({
+            id: `investigation-${this.investigationCycle}-started`,
+            text: INVESTIGATION_COORDINATION_SPEECH,
+            presentationBoundary: "investigation-start",
+          });
           break;
         case "specialist_completed":
           items.push(this.completion(event.result.agent));
@@ -100,6 +97,7 @@ export class VoiceAnnouncementMapper {
           items.push(this.completion("impact"));
           break;
         case "stewart_message":
+          if (isInvestigationCoordinationMessage(event.message.text)) break;
           items.push({
             id: `stewart-message-${event.message.id}`,
             text: event.message.text,
@@ -123,10 +121,19 @@ export class VoiceAnnouncementMapper {
   }
 }
 
+function isInvestigationCoordinationMessage(text: string): boolean {
+  const normalized = text.toLowerCase().replaceAll("’", "'");
+  return [
+    "i'm coordinating lore, timeline, and relationship",
+    "i am coordinating lore, timeline, and relationship",
+  ].some((coordinationLead) => normalized.startsWith(coordinationLead));
+}
+
 interface SpeechQueueOptions {
   synthesis: SpeechSynthesis;
   utterance: typeof SpeechSynthesisUtterance;
   onSpeakingChange: (speaking: boolean) => void;
+  onItemSettled?: (item: SpeechQueueItem, settlement: SpeechQueueSettlement) => void;
 }
 
 const PREFERRED_CLEAR_MALE_VOICE_NAMES = [
@@ -211,8 +218,11 @@ export class BrowserSpeechQueue {
   private readonly pending: SpeechQueueItem[] = [];
   private readonly seen = new Set<string>();
   private current?: SpeechQueueItem;
+  private currentVoice: SpeechSynthesisVoice | null = null;
   private generation = 0;
   private selectedVoice: SpeechSynthesisVoice | null = null;
+  private pinnedVoice: SpeechSynthesisVoice | null = null;
+  private voicePinned = false;
   private readonly handleVoicesChanged = () => this.refreshVoice();
 
   constructor(private readonly options: SpeechQueueOptions) {
@@ -230,16 +240,25 @@ export class BrowserSpeechQueue {
   }
 
   cancelAndClear(): void {
-    this.generation += 1;
-    this.pending.length = 0;
-    this.current = undefined;
-    this.options.synthesis.cancel();
-    this.options.onSpeakingChange(false);
+    this.clear(true);
   }
 
   dispose(): void {
-    this.cancelAndClear();
+    this.clear(false);
     this.options.synthesis.removeEventListener("voiceschanged", this.handleVoicesChanged);
+  }
+
+  private clear(notifySettlement: boolean): void {
+    const cancelled = this.current ? [this.current, ...this.pending] : [...this.pending];
+    this.generation += 1;
+    this.pending.length = 0;
+    this.current = undefined;
+    this.currentVoice = null;
+    this.options.synthesis.cancel();
+    this.options.onSpeakingChange(false);
+    if (notifySettlement) {
+      cancelled.forEach((item) => this.options.onItemSettled?.(item, "cancelled"));
+    }
   }
 
   private advance(): void {
@@ -252,22 +271,42 @@ export class BrowserSpeechQueue {
 
     this.current = next;
     const generation = this.generation;
-    const utterance = new this.options.utterance(next.text);
-    utterance.lang = "en-US";
-    utterance.voice = this.selectedVoice;
-    utterance.onend = () => this.finish(generation);
-    utterance.onerror = () => this.finish(generation);
-    this.options.onSpeakingChange(true);
-    this.options.synthesis.speak(utterance);
+    try {
+      const utterance = new this.options.utterance(next.text);
+      utterance.lang = "en-US";
+      this.currentVoice = this.voicePinned ? this.pinnedVoice : this.selectedVoice;
+      utterance.voice = this.currentVoice;
+      utterance.onend = () => this.finish(generation, "completed");
+      utterance.onerror = () => this.finish(generation, "error");
+      this.options.onSpeakingChange(true);
+      this.options.synthesis.speak(utterance);
+    } catch {
+      this.finish(generation, "error");
+    }
   }
 
-  private finish(generation: number): void {
+  private finish(generation: number, settlement: SpeechQueueSettlement): void {
     if (generation !== this.generation) return;
+    const completedItem = this.current;
+    const completedVoice = this.currentVoice;
+    if (settlement === "completed" && !this.voicePinned && completedVoice) {
+      this.pinnedVoice = completedVoice;
+      this.voicePinned = true;
+    } else if (
+      settlement === "error" &&
+      this.voicePinned &&
+      completedVoice === this.pinnedVoice
+    ) {
+      this.pinnedVoice = null;
+    }
     this.current = undefined;
+    this.currentVoice = null;
+    if (completedItem) this.options.onItemSettled?.(completedItem, settlement);
     this.advance();
   }
 
   private refreshVoice(): void {
+    if (this.voicePinned) return;
     const voices = this.options.synthesis.getVoices();
     this.selectedVoice = selectStewartVoice(voices);
   }
