@@ -146,11 +146,12 @@ describe("voice announcement mapping", () => {
 });
 
 describe("Stewart voice selection", () => {
-  it("prefers an identifiable male English voice over the default English voice", () => {
+  it("prefers a clear male English voice without letting an unwanted male voice outrank it", () => {
+    const unwantedMaleVoice = voice("Albert", "en-US");
     const defaultVoice = voice("Samantha", "en-US", true);
     const maleVoice = voice("Daniel", "en-GB");
 
-    expect(selectStewartVoice([defaultVoice, maleVoice])).toBe(maleVoice);
+    expect(selectStewartVoice([unwantedMaleVoice, defaultVoice, maleVoice])).toBe(maleVoice);
   });
 
   it("falls back to an English voice when no preferred male voice is identifiable", () => {
@@ -183,14 +184,16 @@ describe("Stewart voice selection", () => {
     });
     const maleVoice = voice("Microsoft David", "en-US");
 
-    queue.enqueue([{ id: "message", text: "A Stewart response." }]);
-    expect(harness.utterances).toHaveLength(0);
+    queue.enqueue([{ id: "initial", text: "Initial response." }]);
+    expect(harness.utterances[0].voice).toBeNull();
     harness.setVoices([voice("Samantha", "en-US", true), maleVoice]);
+    queue.enqueue([{ id: "next", text: "Next response." }]);
+    harness.utterances[0].onend?.();
 
-    expect(harness.utterances[0].voice).toBe(maleVoice);
+    expect(harness.utterances[1].voice).toBe(maleVoice);
   });
 
-  it("applies the selected voice to conversational and lifecycle speech", () => {
+  it("applies the selected voice to conversation, clarification, and lifecycle speech", () => {
     const maleVoice = voice("Google UK English Male", "en-GB");
     const harness = createSpeechHarness([maleVoice]);
     const queue = new BrowserSpeechQueue({
@@ -199,6 +202,14 @@ describe("Stewart voice selection", () => {
       onSpeakingChange: vi.fn(),
     });
     const events: WriterRoomEventBatch = [
+      {
+        type: "stewart_message",
+        message: {
+          id: "conversation",
+          speaker: "stewart",
+          text: "I can help investigate that proposal.",
+        },
+      },
       {
         type: "stewart_message",
         message: {
@@ -224,15 +235,70 @@ describe("Stewart voice selection", () => {
     expect(harness.utterances[0].voice).toBe(maleVoice);
     harness.utterances[0].onend?.();
     expect(harness.utterances[1].voice).toBe(maleVoice);
+    harness.utterances[1].onend?.();
+    expect(harness.utterances[2].voice).toBe(maleVoice);
     expect(harness.utterances.map((utterance) => utterance.text)).toEqual([
+      "I can help investigate that proposal.",
       "Who is the falling out between?",
       "Lore investigation complete.",
     ]);
   });
 });
 
+describe("investigation-start speech timing", () => {
+  it("starts Stewart's coordination message immediately without waiting for voices to load", () => {
+    const harness = createSpeechHarness([]);
+    const queue = new BrowserSpeechQueue({
+      synthesis: harness.synthesis,
+      utterance: MockUtterance as unknown as typeof SpeechSynthesisUtterance,
+      onSpeakingChange: vi.fn(),
+    });
+    const events: WriterRoomEventBatch = [
+      {
+        type: "stewart_message",
+        message: {
+          id: "coordination",
+          speaker: "stewart",
+          text: "I’m coordinating Lore, Timeline, and Relationship now.",
+        },
+      },
+      { type: "investigation_started" },
+    ];
+
+    queue.enqueue(new VoiceAnnouncementMapper().map(events));
+
+    expect(harness.speak).toHaveBeenCalledOnce();
+    expect(harness.utterances.map((utterance) => utterance.text)).toEqual([
+      "I’m coordinating Lore, Timeline, and Relationship now.",
+    ]);
+  });
+
+  it("lets microphone cancellation clear stale speech before coordination begins", () => {
+    const harness = createSpeechHarness();
+    const queue = new BrowserSpeechQueue({
+      synthesis: harness.synthesis,
+      utterance: MockUtterance as unknown as typeof SpeechSynthesisUtterance,
+      onSpeakingChange: vi.fn(),
+    });
+
+    queue.enqueue([
+      { id: "stale-current", text: "Stale current speech." },
+      { id: "stale-pending", text: "Stale pending speech." },
+    ]);
+    queue.cancelAndClear();
+    queue.enqueue([{ id: "coordination", text: "Investigation coordination begins." }]);
+    harness.utterances[0].onend?.();
+
+    expect(harness.cancel).toHaveBeenCalledOnce();
+    expect(harness.utterances.map((utterance) => utterance.text)).toEqual([
+      "Stale current speech.",
+      "Investigation coordination begins.",
+    ]);
+  });
+});
+
 describe("browser speech queue", () => {
-  it("speaks FIFO, advances on end and error, and ignores duplicate ids", () => {
+  it("keeps completion announcements FIFO after coordination and ignores duplicate ids", () => {
     const harness = createSpeechHarness();
     const speaking = vi.fn();
     const queue = new BrowserSpeechQueue({
@@ -242,6 +308,7 @@ describe("browser speech queue", () => {
     });
 
     queue.enqueue([
+      { id: "coordination", text: "Investigation coordination begins." },
       { id: "lore", text: "Lore investigation complete." },
       { id: "timeline", text: "Timeline investigation complete." },
       { id: "timeline", text: "Timeline investigation complete." },
@@ -249,20 +316,27 @@ describe("browser speech queue", () => {
     ]);
 
     expect(harness.utterances.map((utterance) => utterance.text)).toEqual([
-      "Lore investigation complete.",
+      "Investigation coordination begins.",
     ]);
     harness.utterances[0].onend?.();
     expect(harness.utterances.map((utterance) => utterance.text)).toEqual([
+      "Investigation coordination begins.",
       "Lore investigation complete.",
-      "Timeline investigation complete.",
     ]);
     harness.utterances[1].onerror?.();
     expect(harness.utterances.map((utterance) => utterance.text)).toEqual([
+      "Investigation coordination begins.",
+      "Lore investigation complete.",
+      "Timeline investigation complete.",
+    ]);
+    harness.utterances[2].onend?.();
+    expect(harness.utterances.map((utterance) => utterance.text)).toEqual([
+      "Investigation coordination begins.",
       "Lore investigation complete.",
       "Timeline investigation complete.",
       "Impact investigation complete.",
     ]);
-    harness.utterances[2].onend?.();
+    harness.utterances[3].onend?.();
     expect(speaking).toHaveBeenLastCalledWith(false);
   });
 

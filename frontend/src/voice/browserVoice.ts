@@ -129,21 +129,79 @@ interface SpeechQueueOptions {
   onSpeakingChange: (speaking: boolean) => void;
 }
 
-const MALE_ENGLISH_VOICE_NAME =
-  /\b(male|alex|albert|aman|daniel|david|eddy|fred|george|guy|mark|ralph|reed|ryan)\b/i;
-const VOICE_LOAD_WAIT_MS = 400;
+const PREFERRED_CLEAR_MALE_VOICE_NAMES = [
+  "alex",
+  "daniel",
+  "reed",
+  "google uk english male",
+  "microsoft david",
+  "microsoft guy",
+  "microsoft mark",
+  "microsoft ryan",
+  "eddy",
+];
+const PREFERRED_CLEAR_ENGLISH_VOICE_NAMES = [
+  "samantha",
+  "google us english",
+  "microsoft aria",
+  "microsoft jenny",
+  "karen",
+  "moira",
+  "tessa",
+];
+const UNSUITABLE_VOICE_NAMES = [
+  "albert",
+  "bad news",
+  "bahh",
+  "bells",
+  "boing",
+  "bubbles",
+  "cellos",
+  "fred",
+  "good news",
+  "jester",
+  "junior",
+  "organ",
+  "ralph",
+  "superstar",
+  "trinoids",
+  "whisper",
+  "wobble",
+  "zarvox",
+];
 
 function isEnglishVoice(voice: SpeechSynthesisVoice): boolean {
   return /^en(?:[-_]|$)/i.test(voice.lang);
 }
 
+function nameMatches(voice: SpeechSynthesisVoice, candidate: string): boolean {
+  const name = voice.name.toLowerCase();
+  return name === candidate || name.startsWith(`${candidate} `);
+}
+
+function preferredVoice(
+  voices: SpeechSynthesisVoice[],
+  candidates: string[],
+): SpeechSynthesisVoice | undefined {
+  for (const candidate of candidates) {
+    const match = voices.find((voice) => nameMatches(voice, candidate));
+    if (match) return match;
+  }
+  return undefined;
+}
+
+function isSuitableVoice(voice: SpeechSynthesisVoice): boolean {
+  return !UNSUITABLE_VOICE_NAMES.some((candidate) => nameMatches(voice, candidate));
+}
+
 export function selectStewartVoice(
   voices: SpeechSynthesisVoice[],
 ): SpeechSynthesisVoice | null {
-  const englishVoices = voices.filter(isEnglishVoice);
+  const englishVoices = voices.filter(isEnglishVoice).filter(isSuitableVoice);
   return (
-    englishVoices.find((voice) => MALE_ENGLISH_VOICE_NAME.test(voice.name)) ??
+    preferredVoice(englishVoices, PREFERRED_CLEAR_MALE_VOICE_NAMES) ??
     englishVoices.find((voice) => voice.default) ??
+    preferredVoice(englishVoices, PREFERRED_CLEAR_ENGLISH_VOICE_NAMES) ??
     englishVoices[0] ??
     null
   );
@@ -155,9 +213,6 @@ export class BrowserSpeechQueue {
   private current?: SpeechQueueItem;
   private generation = 0;
   private selectedVoice: SpeechSynthesisVoice | null = null;
-  private voicesAvailable = false;
-  private voiceWaitExpired = false;
-  private voiceWaitTimer?: ReturnType<typeof setTimeout>;
   private readonly handleVoicesChanged = () => this.refreshVoice();
 
   constructor(private readonly options: SpeechQueueOptions) {
@@ -178,8 +233,6 @@ export class BrowserSpeechQueue {
     this.generation += 1;
     this.pending.length = 0;
     this.current = undefined;
-    if (this.voiceWaitTimer) clearTimeout(this.voiceWaitTimer);
-    this.voiceWaitTimer = undefined;
     this.options.synthesis.cancel();
     this.options.onSpeakingChange(false);
   }
@@ -191,16 +244,6 @@ export class BrowserSpeechQueue {
 
   private advance(): void {
     if (this.current) return;
-    if (this.pending.length > 0 && !this.voicesAvailable && !this.voiceWaitExpired) {
-      if (!this.voiceWaitTimer) {
-        this.voiceWaitTimer = setTimeout(() => {
-          this.voiceWaitTimer = undefined;
-          this.voiceWaitExpired = true;
-          this.advance();
-        }, VOICE_LOAD_WAIT_MS);
-      }
-      return;
-    }
     const next = this.pending.shift();
     if (!next) {
       this.options.onSpeakingChange(false);
@@ -227,10 +270,5 @@ export class BrowserSpeechQueue {
   private refreshVoice(): void {
     const voices = this.options.synthesis.getVoices();
     this.selectedVoice = selectStewartVoice(voices);
-    if (voices.length === 0) return;
-    this.voicesAvailable = true;
-    if (this.voiceWaitTimer) clearTimeout(this.voiceWaitTimer);
-    this.voiceWaitTimer = undefined;
-    this.advance();
   }
 }
