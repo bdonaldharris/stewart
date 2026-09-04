@@ -95,6 +95,65 @@ describe("Writer's Room event sources", () => {
     expect(emitted).toEqual(["writer_message"]);
   });
 
+  it("requests hosted Stewart audio in the same browser conversation", async () => {
+    const audio = new Uint8Array([1, 2, 3]);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ conversationId: "conversation-speech" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(audio, {
+          status: 200,
+          headers: { "Content-Type": "audio/mpeg" },
+        }),
+      )
+      .mockResolvedValueOnce(streamResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+    const source = new BackendEventSource();
+
+    const result = await source.getSpeechAudio("Lore investigation complete.");
+    await source.sendMessage("Continue the proposal");
+
+    expect(result.size).toBeGreaterThan(0);
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      "/api/conversations/conversation-speech/speech",
+    );
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({ text: "Lore investigation complete." }),
+    });
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      "/api/conversations/conversation-speech/messages",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects unusable hosted audio so the voice queue can fall back", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ conversationId: "conversation-speech" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("not audio", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new BackendEventSource().getSpeechAudio("Impact investigation complete."),
+    ).rejects.toThrow("unusable audio");
+  });
+
   it("reports an unavailable local transport without exposing fetch internals", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockRejectedValue(new Error("ECONNREFUSED")));
 

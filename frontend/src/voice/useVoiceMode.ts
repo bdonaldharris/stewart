@@ -9,6 +9,7 @@ import {
   type BrowserSpeechRecognitionErrorEvent,
   type BrowserSpeechRecognitionEvent,
   type ConversationMode,
+  type HostedSpeechRequest,
   type VoiceInteractionState,
 } from "./browserVoice";
 
@@ -35,7 +36,7 @@ export interface VoiceModeController {
   handleTurnError(): void;
 }
 
-export function useVoiceMode(): VoiceModeController {
+export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceModeController {
   const capabilities = useMemo(() => detectVoiceCapabilities(), []);
   const [mode, setModeState] = useState<ConversationMode>("text");
   const [state, setState] = useState<VoiceInteractionState>("ready");
@@ -58,6 +59,11 @@ export function useVoiceMode(): VoiceModeController {
   const speechQueueRef = useRef<BrowserSpeechQueue | undefined>(undefined);
   const initialTransitionArmedRef = useRef(false);
   const investigationBoundaryInFlightRef = useRef(false);
+  const hostedSpeechRef = useRef(requestHostedSpeech);
+
+  useEffect(() => {
+    hostedSpeechRef.current = requestHostedSpeech;
+  }, [requestHostedSpeech]);
 
   const updateState = useCallback((next: VoiceInteractionState) => {
     stateRef.current = next;
@@ -76,6 +82,19 @@ export function useVoiceMode(): VoiceModeController {
       speechQueueRef.current = new BrowserSpeechQueue({
         synthesis: window.speechSynthesis,
         utterance: window.SpeechSynthesisUtterance,
+        hosted: requestHostedSpeech
+          ? {
+              request: (text, signal) => {
+                const request = hostedSpeechRef.current;
+                return request
+                  ? request(text, signal)
+                  : Promise.reject(new Error("Hosted speech is unavailable."));
+              },
+              createAudio: (source) => new Audio(source),
+              createObjectURL: (audio) => URL.createObjectURL(audio),
+              revokeObjectURL: (source) => URL.revokeObjectURL(source),
+            }
+          : undefined,
         onSpeakingChange: (speaking) => {
           if (modeRef.current !== "voice") return;
           if (speaking) updateState("speaking");
@@ -89,7 +108,7 @@ export function useVoiceMode(): VoiceModeController {
       });
     }
     return speechQueueRef.current;
-  }, [capabilities.available, releaseWorkspaceTransition, updateState]);
+  }, [capabilities.available, releaseWorkspaceTransition, requestHostedSpeech, updateState]);
 
   const releaseMicrophone = useCallback(() => {
     audioSourceRef.current?.disconnect();

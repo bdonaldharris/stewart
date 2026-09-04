@@ -2,6 +2,7 @@ import asyncio
 import json
 from unittest.mock import AsyncMock
 
+import pytest
 from google.adk.events import Event, EventActions
 from google.genai import types
 from httpx import ASGITransport, AsyncClient
@@ -25,6 +26,13 @@ from stewart.contracts import (
     TimelineResult,
 )
 from stewart.runtime import RunResult
+from stewart.speech import (
+    FIXED_LIFECYCLE_PHRASES,
+    MAX_SPEECH_CHARACTERS,
+    SpeechFailureKind,
+    SpeechProviderError,
+    StewartSpeechSynthesizer,
+)
 from stewart.web import (
     COMPLETION_MESSAGE,
     SAFE_RUNTIME_ERROR,
@@ -208,6 +216,155 @@ def test_browser_registry_creates_one_conversation_and_continues_it() -> None:
     assert conversation.send.await_args_list[0].args == ("A proposal",)
     assert conversation.send.await_args_list[1].args == ("Immediately after Endgame",)
     assert conversation.send.await_args_list[0].kwargs == {"on_event": observer}
+
+
+def _speech_synthesizer(audio: bytes = b"mp3-audio") -> AsyncMock:
+    speech = AsyncMock(spec=StewartSpeechSynthesizer)
+    speech.synthesize.return_value = audio
+    return speech
+
+
+def test_speech_endpoint_synthesizes_authorized_fixed_lifecycle_phrase_as_mp3() -> None:
+    registry = BrowserConversationRegistry(factory=AsyncMock(return_value=AsyncMock()))
+    speech = _speech_synthesizer()
+    app = create_app(registry, speech=speech)
+    phrase = "Lore investigation complete."
+    assert phrase in FIXED_LIFECYCLE_PHRASES
+
+    async def exercise():
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            conversation_id = (await client.post("/api/conversations")).json()["conversationId"]
+            return await client.post(
+                f"/api/conversations/{conversation_id}/speech",
+                json={"text": phrase},
+            )
+
+    response = asyncio.run(exercise())
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/mpeg"
+    assert response.content == b"mp3-audio"
+    speech.synthesize.assert_awaited_once_with(phrase)
+
+
+def test_speech_endpoint_authorizes_only_emitted_stewart_text_for_conversation() -> None:
+    conversation = AsyncMock()
+    conversation.send.return_value = _result(
+        response="**Who** is the falling out between?",
+        next_step=StewartNextStep.ASK_WRITER,
+    )
+    registry = BrowserConversationRegistry(factory=AsyncMock(return_value=conversation))
+    speech = _speech_synthesizer()
+    app = create_app(registry, speech=speech)
+
+    async def exercise():
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            conversation_id = (await client.post("/api/conversations")).json()["conversationId"]
+            await client.post(
+                f"/api/conversations/{conversation_id}/messages",
+                json={"message": "A vague falling out"},
+            )
+            authorized = await client.post(
+                f"/api/conversations/{conversation_id}/speech",
+                json={"text": "Who is the falling out between?"},
+            )
+            writer = await client.post(
+                f"/api/conversations/{conversation_id}/speech",
+                json={"text": "A vague falling out"},
+            )
+            return authorized, writer
+
+    authorized, writer = asyncio.run(exercise())
+
+    assert authorized.status_code == 200
+    assert writer.status_code == 403
+    speech.synthesize.assert_awaited_once_with("Who is the falling out between?")
+
+
+@pytest.mark.parametrize(
+    "unauthorized_text",
+    [
+        "Arbitrary text supplied by the browser.",
+        "A specialist finding must remain private.",
+        "A report section must not become authorized speech.",
+    ],
+)
+def test_speech_endpoint_rejects_arbitrary_specialist_and_report_text(
+    unauthorized_text: str,
+) -> None:
+    registry = BrowserConversationRegistry(factory=AsyncMock(return_value=AsyncMock()))
+    speech = _speech_synthesizer()
+    app = create_app(registry, speech=speech)
+
+    async def exercise():
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            conversation_id = (await client.post("/api/conversations")).json()["conversationId"]
+            return await client.post(
+                f"/api/conversations/{conversation_id}/speech",
+                json={"text": unauthorized_text},
+            )
+
+    response = asyncio.run(exercise())
+
+    assert response.status_code == 403
+    speech.synthesize.assert_not_awaited()
+
+
+def test_speech_endpoint_rejects_over_length_and_client_voice_configuration() -> None:
+    registry = BrowserConversationRegistry(factory=AsyncMock(return_value=AsyncMock()))
+    speech = _speech_synthesizer()
+    app = create_app(registry, speech=speech)
+
+    async def exercise():
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            conversation_id = (await client.post("/api/conversations")).json()["conversationId"]
+            over_length = await client.post(
+                f"/api/conversations/{conversation_id}/speech",
+                json={"text": "x" * (MAX_SPEECH_CHARACTERS + 1)},
+            )
+            voice_override = await client.post(
+                f"/api/conversations/{conversation_id}/speech",
+                json={"text": "Lore investigation complete.", "voice": "another-voice"},
+            )
+            return over_length, voice_override
+
+    over_length, voice_override = asyncio.run(exercise())
+
+    assert over_length.status_code == 422
+    assert voice_override.status_code == 422
+    speech.synthesize.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("kind", "status_code"),
+    [
+        (SpeechFailureKind.PERMISSION, 503),
+        (SpeechFailureKind.QUOTA, 429),
+        (SpeechFailureKind.TIMEOUT, 504),
+        (SpeechFailureKind.UNAVAILABLE, 503),
+    ],
+)
+def test_speech_endpoint_maps_expected_provider_failure_for_browser_fallback(
+    kind: SpeechFailureKind,
+    status_code: int,
+) -> None:
+    registry = BrowserConversationRegistry(factory=AsyncMock(return_value=AsyncMock()))
+    speech = _speech_synthesizer()
+    speech.synthesize.side_effect = SpeechProviderError(kind)
+    app = create_app(registry, speech=speech)
+
+    async def exercise():
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            conversation_id = (await client.post("/api/conversations")).json()["conversationId"]
+            return await client.post(
+                f"/api/conversations/{conversation_id}/speech",
+                json={"text": "Impact investigation complete."},
+            )
+
+    response = asyncio.run(exercise())
+
+    assert response.status_code == status_code
+    assert response.json() == {"detail": "Stewart's hosted voice is temporarily unavailable."}
 
 
 def test_mapper_preserves_parallel_evidence_and_finding_relationships() -> None:

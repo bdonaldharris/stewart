@@ -132,8 +132,26 @@ function isInvestigationCoordinationMessage(text: string): boolean {
 interface SpeechQueueOptions {
   synthesis: SpeechSynthesis;
   utterance: typeof SpeechSynthesisUtterance;
+  hosted?: HostedSpeechOptions;
   onSpeakingChange: (speaking: boolean) => void;
   onItemSettled?: (item: SpeechQueueItem, settlement: SpeechQueueSettlement) => void;
+}
+
+export type HostedSpeechRequest = (text: string, signal: AbortSignal) => Promise<Blob>;
+
+export interface HostedAudio {
+  onended: ((event: Event) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  src: string;
+  pause(): void;
+  play(): Promise<void>;
+}
+
+interface HostedSpeechOptions {
+  request: HostedSpeechRequest;
+  createAudio: (source: string) => HostedAudio;
+  createObjectURL: (audio: Blob) => string;
+  revokeObjectURL: (source: string) => void;
 }
 
 const PREFERRED_CLEAR_MALE_VOICE_NAMES = [
@@ -225,7 +243,11 @@ export class BrowserSpeechQueue {
   private readonly pending: SpeechQueueItem[] = [];
   private readonly seen = new Set<string>();
   private current?: SpeechQueueItem;
+  private currentAudio?: HostedAudio;
+  private currentObjectUrl?: string;
+  private currentRequest?: AbortController;
   private currentVoice: SpeechSynthesisVoice | null = null;
+  private browserFallbackStarted = false;
   private generation = 0;
   private selectedVoice: SpeechSynthesisVoice | null = null;
   private pinnedVoice: SpeechSynthesisVoice | null = null;
@@ -261,6 +283,8 @@ export class BrowserSpeechQueue {
     this.pending.length = 0;
     this.current = undefined;
     this.currentVoice = null;
+    this.browserFallbackStarted = false;
+    this.stopHostedPlayback();
     this.options.synthesis.cancel();
     this.options.onSpeakingChange(false);
     if (notifySettlement) {
@@ -277,16 +301,62 @@ export class BrowserSpeechQueue {
     }
 
     this.current = next;
+    this.browserFallbackStarted = false;
     const generation = this.generation;
+    this.options.onSpeakingChange(true);
+    if (this.options.hosted) {
+      void this.playHosted(next, generation);
+      return;
+    }
+    this.playBrowser(next, generation);
+  }
+
+  private async playHosted(item: SpeechQueueItem, generation: number): Promise<void> {
+    const hosted = this.options.hosted;
+    if (!hosted) {
+      this.playBrowser(item, generation);
+      return;
+    }
+
+    const request = new AbortController();
+    this.currentRequest = request;
+    try {
+      const blob = await hosted.request(item.text, request.signal);
+      if (generation !== this.generation || this.current !== item) return;
+      this.currentRequest = undefined;
+      const objectUrl = hosted.createObjectURL(blob);
+      this.currentObjectUrl = objectUrl;
+      const audio = hosted.createAudio(objectUrl);
+      this.currentAudio = audio;
+      audio.onended = () => {
+        this.stopHostedPlayback();
+        this.finish(generation, "completed");
+      };
+      audio.onerror = () => this.fallbackToBrowser(item, generation);
+      await audio.play();
+    } catch {
+      if (generation !== this.generation || this.current !== item) return;
+      this.fallbackToBrowser(item, generation);
+    }
+  }
+
+  private fallbackToBrowser(item: SpeechQueueItem, generation: number): void {
+    if (generation !== this.generation || this.current !== item) return;
+    if (this.browserFallbackStarted) return;
+    this.browserFallbackStarted = true;
+    this.stopHostedPlayback();
+    this.playBrowser(item, generation);
+  }
+
+  private playBrowser(item: SpeechQueueItem, generation: number): void {
     try {
       if (!this.voicePinned) this.refreshVoice();
-      const utterance = new this.options.utterance(next.text);
+      const utterance = new this.options.utterance(item.text);
       this.currentVoice = this.voicePinned ? this.pinnedVoice : this.selectedVoice;
       utterance.lang = this.currentVoice?.lang || "en-US";
       utterance.voice = this.currentVoice;
       utterance.onend = () => this.finish(generation, "completed");
       utterance.onerror = () => this.finish(generation, "error");
-      this.options.onSpeakingChange(true);
       this.options.synthesis.speak(utterance);
     } catch {
       this.finish(generation, "error");
@@ -309,8 +379,25 @@ export class BrowserSpeechQueue {
     }
     this.current = undefined;
     this.currentVoice = null;
+    this.browserFallbackStarted = false;
     if (completedItem) this.options.onItemSettled?.(completedItem, settlement);
     this.advance();
+  }
+
+  private stopHostedPlayback(): void {
+    this.currentRequest?.abort();
+    this.currentRequest = undefined;
+    if (this.currentAudio) {
+      this.currentAudio.onended = null;
+      this.currentAudio.onerror = null;
+      this.currentAudio.pause();
+      this.currentAudio.src = "";
+      this.currentAudio = undefined;
+    }
+    if (this.currentObjectUrl) {
+      this.options.hosted?.revokeObjectURL(this.currentObjectUrl);
+      this.currentObjectUrl = undefined;
+    }
   }
 
   private refreshVoice(): void {

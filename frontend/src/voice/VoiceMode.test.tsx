@@ -8,6 +8,7 @@ import type { WriterRoomEventSource } from "../services/eventSource";
 import type {
   BrowserSpeechRecognitionErrorEvent,
   BrowserSpeechRecognitionEvent,
+  HostedAudio,
 } from "./browserVoice";
 
 class MockRecognition extends EventTarget {
@@ -115,6 +116,30 @@ class StreamingSource implements WriterRoomEventSource {
   }
 }
 
+class HostedStreamingSource extends StreamingSource {
+  readonly speechRequests: Array<{ text: string; signal?: AbortSignal }> = [];
+
+  async getSpeechAudio(text: string, signal?: AbortSignal): Promise<Blob> {
+    this.speechRequests.push({ text, signal });
+    return new Blob(["mp3-audio"], { type: "audio/mpeg" });
+  }
+}
+
+class FailingHostedStreamingSource extends StreamingSource {
+  readonly getSpeechAudio = vi.fn(async () => {
+    throw new Error("Hosted speech unavailable");
+  });
+}
+
+class MockHostedAudio implements HostedAudio {
+  onended: ((event: Event) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  pause = vi.fn();
+  play = vi.fn(async () => undefined);
+
+  constructor(public src: string) {}
+}
+
 interface BrowserMocks {
   getUserMedia: ReturnType<typeof vi.fn>;
   speechSynthesis: {
@@ -124,6 +149,8 @@ interface BrowserMocks {
   };
   trackStop: ReturnType<typeof vi.fn>;
   analyserRead: ReturnType<typeof vi.fn>;
+  hostedAudios: MockHostedAudio[];
+  revokeObjectURL: ReturnType<typeof vi.fn>;
   utterances: MockUtterance[];
   runAnimationFrame(): void;
 }
@@ -132,11 +159,14 @@ const originalDescriptors = {
   recognition: Object.getOwnPropertyDescriptor(window, "SpeechRecognition"),
   webkitRecognition: Object.getOwnPropertyDescriptor(window, "webkitSpeechRecognition"),
   audioContext: Object.getOwnPropertyDescriptor(window, "AudioContext"),
+  audio: Object.getOwnPropertyDescriptor(window, "Audio"),
   utterance: Object.getOwnPropertyDescriptor(window, "SpeechSynthesisUtterance"),
   synthesis: Object.getOwnPropertyDescriptor(window, "speechSynthesis"),
   mediaDevices: Object.getOwnPropertyDescriptor(navigator, "mediaDevices"),
   requestAnimationFrame: Object.getOwnPropertyDescriptor(window, "requestAnimationFrame"),
   cancelAnimationFrame: Object.getOwnPropertyDescriptor(window, "cancelAnimationFrame"),
+  createObjectURL: Object.getOwnPropertyDescriptor(URL, "createObjectURL"),
+  revokeObjectURL: Object.getOwnPropertyDescriptor(URL, "revokeObjectURL"),
 };
 
 function restore(target: object, key: PropertyKey, descriptor?: PropertyDescriptor) {
@@ -183,6 +213,16 @@ function installBrowserMocks(options: { permissionDenied?: boolean } = {}): Brow
     cancel: vi.fn(),
     getVoices: vi.fn(() => [defaultVoice]),
   });
+  const hostedAudios: MockHostedAudio[] = [];
+  class MockAudio {
+    constructor(source: string) {
+      const audio = new MockHostedAudio(source);
+      hostedAudios.push(audio);
+      return audio;
+    }
+  }
+  const createObjectURL = vi.fn(() => `blob:stewart-${hostedAudios.length + 1}`);
+  const revokeObjectURL = vi.fn();
   let animationFrame: FrameRequestCallback | undefined;
 
   Object.defineProperty(window, "SpeechRecognition", {
@@ -192,6 +232,18 @@ function installBrowserMocks(options: { permissionDenied?: boolean } = {}): Brow
   Object.defineProperty(window, "AudioContext", {
     configurable: true,
     value: MockAudioContext,
+  });
+  Object.defineProperty(window, "Audio", {
+    configurable: true,
+    value: MockAudio,
+  });
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: createObjectURL,
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: revokeObjectURL,
   });
   Object.defineProperty(window, "SpeechSynthesisUtterance", {
     configurable: true,
@@ -222,6 +274,8 @@ function installBrowserMocks(options: { permissionDenied?: boolean } = {}): Brow
     speechSynthesis,
     trackStop,
     analyserRead,
+    hostedAudios,
+    revokeObjectURL,
     utterances,
     runAnimationFrame: () => animationFrame?.(0),
   };
@@ -245,11 +299,14 @@ afterEach(() => {
   restore(window, "SpeechRecognition", originalDescriptors.recognition);
   restore(window, "webkitSpeechRecognition", originalDescriptors.webkitRecognition);
   restore(window, "AudioContext", originalDescriptors.audioContext);
+  restore(window, "Audio", originalDescriptors.audio);
   restore(window, "SpeechSynthesisUtterance", originalDescriptors.utterance);
   restore(window, "speechSynthesis", originalDescriptors.synthesis);
   restore(navigator, "mediaDevices", originalDescriptors.mediaDevices);
   restore(window, "requestAnimationFrame", originalDescriptors.requestAnimationFrame);
   restore(window, "cancelAnimationFrame", originalDescriptors.cancelAnimationFrame);
+  restore(URL, "createObjectURL", originalDescriptors.createObjectURL);
+  restore(URL, "revokeObjectURL", originalDescriptors.revokeObjectURL);
 });
 
 describe("Writer's Room Voice Mode", () => {
@@ -287,8 +344,9 @@ describe("Writer's Room Voice Mode", () => {
     await user.click(screen.getByRole("radio", { name: "Voice" }));
     expect(mocks.speechSynthesis.getVoices).toHaveBeenCalled();
     expect(
-      screen.getByText(/Voice recognition is provided by your browser and may use its speech service/),
+      screen.getByText(/Writer speech recognition may use your browser vendor's speech service/),
     ).toBeInTheDocument();
+    expect(screen.getByText(/spoken replies are generated by Google Cloud/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Start listening" }));
 
     expect(mocks.getUserMedia).toHaveBeenCalledWith({ audio: true });
@@ -428,6 +486,103 @@ describe("Writer's Room Voice Mode", () => {
     expect(screen.getByRole("heading", { name: "Specialist Workspace" })).toBeInTheDocument();
     expect(screen.getByTestId("agent-card-lore")).toHaveTextContent("Searching sources");
     expect(mocks.utterances).toHaveLength(1);
+    act(() => source.finish());
+  });
+
+  it("waits for hosted coordination audio and cancels hosted playback on microphone start", async () => {
+    const mocks = installBrowserMocks();
+    const source = new HostedStreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await submitVoiceProposal(user, "A proposal for hosted speech");
+    act(() =>
+      source.emit([
+        { type: "investigation_started" },
+        {
+          type: "specialist_status",
+          agent: "lore",
+          status: "active",
+          activity: "Searching sources",
+        },
+      ]),
+    );
+
+    await waitFor(() => expect(source.speechRequests).toHaveLength(1));
+    expect(source.speechRequests[0].text).toBe(
+      "I'm sending your proposal to the investigation team.",
+    );
+    expect(mocks.speechSynthesis.speak).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("heading", { name: "Bring the idea. Stewart will map what it touches." }),
+    ).toBeInTheDocument();
+
+    act(() => mocks.hostedAudios[0].onended?.(new Event("ended")));
+    expect(screen.getByRole("heading", { name: "Specialist Workspace" })).toBeInTheDocument();
+    expect(mocks.revokeObjectURL).toHaveBeenCalledWith("blob:stewart-1");
+
+    act(() =>
+      source.emit([
+        {
+          type: "specialist_completed",
+          result: {
+            agent: "lore",
+            summary: "Lore complete.",
+            findings: [],
+            sources: [],
+            assumptions: [],
+          },
+        },
+      ]),
+    );
+    await waitFor(() => expect(source.speechRequests).toHaveLength(2));
+    await user.click(screen.getByRole("button", { name: "Start listening" }));
+
+    expect(mocks.hostedAudios[1].pause).toHaveBeenCalledOnce();
+    expect(mocks.revokeObjectURL).toHaveBeenCalledWith("blob:stewart-2");
+    expect(mocks.speechSynthesis.cancel).toHaveBeenCalled();
+    act(() => source.finish());
+  });
+
+  it("releases hosted coordination and cancels playback when switching to Text", async () => {
+    const mocks = installBrowserMocks();
+    const source = new HostedStreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await submitVoiceProposal(user, "A hosted proposal cancelled into Text mode");
+    act(() => source.emit([{ type: "investigation_started" }]));
+    await waitFor(() => expect(mocks.hostedAudios).toHaveLength(1));
+
+    await user.click(screen.getByRole("radio", { name: "Text" }));
+
+    expect(mocks.hostedAudios[0].pause).toHaveBeenCalledOnce();
+    expect(mocks.revokeObjectURL).toHaveBeenCalledWith("blob:stewart-1");
+    expect(screen.getByRole("heading", { name: "Specialist Workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Text" })).toHaveAttribute("aria-checked", "true");
+    act(() => source.finish());
+  });
+
+  it("releases hosted coordination through browser fallback when the request fails", async () => {
+    const mocks = installBrowserMocks();
+    const source = new FailingHostedStreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await submitVoiceProposal(user, "A proposal with hosted speech unavailable");
+    act(() => source.emit([{ type: "investigation_started" }]));
+    await waitFor(() => expect(mocks.utterances).toHaveLength(1));
+
+    expect(source.getSpeechAudio).toHaveBeenCalledWith(
+      "I'm sending your proposal to the investigation team.",
+      expect.any(AbortSignal),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Bring the idea. Stewart will map what it touches." }),
+    ).toBeInTheDocument();
+    act(() => mocks.utterances[0].onend?.());
+
+    expect(screen.getByRole("heading", { name: "Specialist Workspace" })).toBeInTheDocument();
     act(() => source.finish());
   });
 

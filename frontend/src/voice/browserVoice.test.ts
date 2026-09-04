@@ -5,6 +5,8 @@ import {
   BrowserSpeechQueue,
   selectStewartVoice,
   VoiceAnnouncementMapper,
+  type HostedAudio,
+  type HostedSpeechRequest,
 } from "./browserVoice";
 
 class MockUtterance {
@@ -53,6 +55,43 @@ function createSpeechHarness(
       synthesis.dispatchEvent(new Event("voiceschanged"));
     },
   };
+}
+
+class MockHostedAudio implements HostedAudio {
+  onended: ((event: Event) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  pause = vi.fn();
+  play = vi.fn(async () => undefined);
+
+  constructor(public src: string) {}
+}
+
+function createHostedHarness(
+  request: HostedSpeechRequest = vi.fn(async () =>
+    new Blob(["mp3-audio"], { type: "audio/mpeg" }),
+  ),
+) {
+  const audios: MockHostedAudio[] = [];
+  const createObjectURL = vi.fn(() => `blob:stewart-${audios.length + 1}`);
+  const revokeObjectURL = vi.fn();
+  const createAudio = vi.fn((source: string) => {
+    const audio = new MockHostedAudio(source);
+    audios.push(audio);
+    return audio;
+  });
+  return {
+    request,
+    audios,
+    createObjectURL,
+    revokeObjectURL,
+    createAudio,
+    options: { request, createObjectURL, revokeObjectURL, createAudio },
+  };
+}
+
+async function settlePromises() {
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe("voice announcement mapping", () => {
@@ -395,6 +434,124 @@ describe("investigation-start speech timing", () => {
 });
 
 describe("browser speech queue", () => {
+  it("uses hosted audio as the primary FIFO playback path", async () => {
+    const browser = createSpeechHarness();
+    const hosted = createHostedHarness();
+    const settled = vi.fn();
+    const queue = new BrowserSpeechQueue({
+      synthesis: browser.synthesis,
+      utterance: MockUtterance as unknown as typeof SpeechSynthesisUtterance,
+      hosted: hosted.options,
+      onSpeakingChange: vi.fn(),
+      onItemSettled: settled,
+    });
+
+    queue.enqueue([
+      { id: "coordination", text: "I'm sending your proposal to the investigation team." },
+      { id: "lore", text: "Lore investigation complete." },
+    ]);
+    await settlePromises();
+
+    expect(hosted.request).toHaveBeenCalledTimes(1);
+    expect(hosted.audios).toHaveLength(1);
+    expect(browser.speak).not.toHaveBeenCalled();
+    hosted.audios[0].onended?.(new Event("ended"));
+    await settlePromises();
+
+    expect(hosted.request).toHaveBeenCalledTimes(2);
+    expect(hosted.audios).toHaveLength(2);
+    expect(settled).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "coordination" }),
+      "completed",
+    );
+    hosted.audios[1].onended?.(new Event("ended"));
+    expect(hosted.revokeObjectURL).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to browser speech when hosted synthesis fails", async () => {
+    const browser = createSpeechHarness();
+    const hosted = createHostedHarness(vi.fn().mockRejectedValue(new Error("unavailable")));
+    const queue = new BrowserSpeechQueue({
+      synthesis: browser.synthesis,
+      utterance: MockUtterance as unknown as typeof SpeechSynthesisUtterance,
+      hosted: hosted.options,
+      onSpeakingChange: vi.fn(),
+    });
+
+    queue.enqueue([{ id: "message", text: "A Stewart response." }]);
+    await settlePromises();
+
+    expect(browser.speak).toHaveBeenCalledOnce();
+    expect(browser.utterances[0].text).toBe("A Stewart response.");
+  });
+
+  it("falls back after hosted playback errors and settles text-only if the browser fails", async () => {
+    const browser = createSpeechHarness();
+    const hosted = createHostedHarness();
+    const settled = vi.fn();
+    const queue = new BrowserSpeechQueue({
+      synthesis: browser.synthesis,
+      utterance: MockUtterance as unknown as typeof SpeechSynthesisUtterance,
+      hosted: hosted.options,
+      onSpeakingChange: vi.fn(),
+      onItemSettled: settled,
+    });
+
+    queue.enqueue([{ id: "message", text: "A Stewart response." }]);
+    await settlePromises();
+    hosted.audios[0].onerror?.(new Event("error"));
+
+    expect(browser.speak).toHaveBeenCalledOnce();
+    browser.utterances[0].onerror?.();
+    expect(settled).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "message" }),
+      "error",
+    );
+    expect(hosted.revokeObjectURL).toHaveBeenCalledWith("blob:stewart-1");
+  });
+
+  it("aborts an in-flight hosted request when cancelled", async () => {
+    const browser = createSpeechHarness();
+    let requestSignal: AbortSignal | undefined;
+    const request = vi.fn((_text: string, signal: AbortSignal) => {
+      requestSignal = signal;
+      return new Promise<Blob>(() => undefined);
+    });
+    const hosted = createHostedHarness(request);
+    const queue = new BrowserSpeechQueue({
+      synthesis: browser.synthesis,
+      utterance: MockUtterance as unknown as typeof SpeechSynthesisUtterance,
+      hosted: hosted.options,
+      onSpeakingChange: vi.fn(),
+    });
+
+    queue.enqueue([{ id: "message", text: "A Stewart response." }]);
+    queue.cancelAndClear();
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(hosted.audios).toHaveLength(0);
+    expect(browser.cancel).toHaveBeenCalledOnce();
+  });
+
+  it("cancels hosted playback and revokes its object URL", async () => {
+    const browser = createSpeechHarness();
+    const hosted = createHostedHarness();
+    const queue = new BrowserSpeechQueue({
+      synthesis: browser.synthesis,
+      utterance: MockUtterance as unknown as typeof SpeechSynthesisUtterance,
+      hosted: hosted.options,
+      onSpeakingChange: vi.fn(),
+    });
+
+    queue.enqueue([{ id: "message", text: "A Stewart response." }]);
+    await settlePromises();
+    queue.cancelAndClear();
+
+    expect(hosted.audios[0].pause).toHaveBeenCalledOnce();
+    expect(hosted.revokeObjectURL).toHaveBeenCalledWith("blob:stewart-1");
+    expect(browser.cancel).toHaveBeenCalledOnce();
+  });
+
   it("keeps completion announcements FIFO after coordination and ignores duplicate ids", () => {
     const harness = createSpeechHarness();
     const speaking = vi.fn();

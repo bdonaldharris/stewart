@@ -27,7 +27,16 @@ export function App({ eventSource }: AppProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [speechRevision, setSpeechRevision] = useState(0);
-  const voice = useVoiceMode();
+  const requestHostedSpeech = useCallback(
+    (text: string, signal: AbortSignal) => {
+      const request = source.getSpeechAudio;
+      return request
+        ? request.call(source, text, signal)
+        : Promise.reject(new Error("Hosted speech is unavailable."));
+    },
+    [source],
+  );
+  const voice = useVoiceMode(source.getSpeechAudio ? requestHostedSpeech : undefined);
   const prepareVoiceEvents = voice.prepareEvents;
   const pendingSpeechEventsRef = useRef<WriterRoomEventBatch[]>([]);
   const pendingFinalEventsRef = useRef<WriterRoomEvent[]>([]);
