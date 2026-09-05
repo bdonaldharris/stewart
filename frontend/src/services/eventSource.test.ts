@@ -132,6 +132,35 @@ describe("Writer's Room event sources", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("reuses the landing welcome conversation for the writer's first submission", async () => {
+    const audio = new Uint8Array([1, 2, 3]);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ conversationId: "conversation-welcome" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(audio, { status: 200, headers: { "Content-Type": "audio/mpeg" } }),
+      )
+      .mockResolvedValueOnce(streamResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+    const source = new BackendEventSource();
+
+    await source.getSpeechAudio("Welcome to Stewart. What story are we protecting today?");
+    await source.sendMessage("A writer proposal");
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      "/api/conversations/conversation-welcome/speech",
+    );
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      "/api/conversations/conversation-welcome/messages",
+    );
+  });
+
   it("rejects unusable hosted audio so the voice queue can fall back", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

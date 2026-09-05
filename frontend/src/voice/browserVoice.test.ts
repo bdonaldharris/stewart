@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { WriterRoomEventBatch } from "../model/events";
 import {
   BrowserSpeechQueue,
+  LANDING_WELCOME_SPEECH,
   selectStewartVoice,
   VoiceAnnouncementMapper,
   type HostedAudio,
@@ -434,6 +435,51 @@ describe("investigation-start speech timing", () => {
 });
 
 describe("browser speech queue", () => {
+  it("keeps an autoplay-blocked landing welcome pending until a writer interaction resumes it", async () => {
+    const browser = createSpeechHarness();
+    const autoplayBlocked = Object.assign(new Error("User activation is required."), {
+      name: "NotAllowedError",
+    });
+    const hosted = createHostedHarness();
+    hosted.createAudio.mockImplementation((source) => {
+      const audio = new MockHostedAudio(source);
+      if (hosted.audios.length === 0) audio.play.mockRejectedValue(autoplayBlocked);
+      hosted.audios.push(audio);
+      return audio;
+    });
+    const settled = vi.fn();
+    const queue = new BrowserSpeechQueue({
+      synthesis: browser.synthesis,
+      utterance: MockUtterance as unknown as typeof SpeechSynthesisUtterance,
+      hosted: hosted.options,
+      onSpeakingChange: vi.fn(),
+      onItemSettled: settled,
+    });
+
+    queue.enqueue([
+      {
+        id: "landing-welcome",
+        text: LANDING_WELCOME_SPEECH,
+        presentationBoundary: "landing-welcome",
+      },
+    ]);
+    await settlePromises();
+
+    expect(settled).not.toHaveBeenCalled();
+    expect(browser.speak).not.toHaveBeenCalled();
+
+    queue.resumeAfterUserActivation();
+    await settlePromises();
+
+    expect(hosted.request).toHaveBeenCalledTimes(2);
+    expect(hosted.audios).toHaveLength(2);
+    hosted.audios[1].onended?.(new Event("ended"));
+    expect(settled).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "landing-welcome", text: LANDING_WELCOME_SPEECH }),
+      "completed",
+    );
+  });
+
   it("uses hosted audio as the primary FIFO playback path", async () => {
     const browser = createSpeechHarness();
     const hosted = createHostedHarness();

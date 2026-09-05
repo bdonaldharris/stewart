@@ -4,6 +4,7 @@ import type { WriterRoomEventBatch } from "../model/events";
 import {
   BrowserSpeechQueue,
   detectVoiceCapabilities,
+  LANDING_WELCOME_SPEECH,
   VoiceAnnouncementMapper,
   type BrowserSpeechRecognition,
   type BrowserSpeechRecognitionErrorEvent,
@@ -26,6 +27,7 @@ export interface VoiceModeController {
   error?: string;
   analyser?: AnalyserNode;
   workspaceTransitionPending: boolean;
+  releaseLandingWelcome(): void;
   setMode(mode: ConversationMode): void;
   toggleListening(): Promise<void>;
   clearTranscript(): void;
@@ -61,6 +63,9 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
   const initialTransitionArmedRef = useRef(false);
   const investigationBoundaryInFlightRef = useRef(false);
   const hostedSpeechRef = useRef(requestHostedSpeech);
+  const landingWelcomePendingRef = useRef(false);
+  const microphoneAfterWelcomeRef = useRef(false);
+  const startListeningRef = useRef<(() => Promise<void>) | undefined>(undefined);
 
   useEffect(() => {
     hostedSpeechRef.current = requestHostedSpeech;
@@ -102,6 +107,13 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
           else if (stateRef.current === "speaking") updateState("ready");
         },
         onItemSettled: (item) => {
+          if (item.presentationBoundary === "landing-welcome") {
+            landingWelcomePendingRef.current = false;
+            if (microphoneAfterWelcomeRef.current) {
+              microphoneAfterWelcomeRef.current = false;
+              void startListeningRef.current?.();
+            }
+          }
           if (item.presentationBoundary === "investigation-start") {
             releaseWorkspaceTransition();
           }
@@ -141,9 +153,15 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
   const setMode = useCallback(
     (next: ConversationMode) => {
       if (next === "voice" && !capabilities.available) return;
-      if (next === modeRef.current) return;
+      if (next === modeRef.current) {
+        if (landingWelcomePendingRef.current) {
+          ensureSpeechQueue()?.resumeAfterUserActivation();
+        }
+        return;
+      }
       if (next === "text") {
-        cancelVoiceOutput();
+        if (landingWelcomePendingRef.current) ensureSpeechQueue()?.resumeAfterUserActivation();
+        else cancelVoiceOutput();
         stopRecognition(true);
         releaseWorkspaceTransition();
         setError(undefined);
@@ -282,14 +300,39 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
     updateState,
   ]);
 
+  useEffect(() => {
+    startListeningRef.current = startListening;
+  }, [startListening]);
+
   const toggleListening = useCallback(async () => {
+    if (landingWelcomePendingRef.current) {
+      microphoneAfterWelcomeRef.current = true;
+      ensureSpeechQueue()?.resumeAfterUserActivation();
+      return;
+    }
     if (stateRef.current === "listening") {
       updateState("processing");
       stopRecognition(false);
       return;
     }
     await startListening();
-  }, [startListening, stopRecognition, updateState]);
+  }, [ensureSpeechQueue, startListening, stopRecognition, updateState]);
+
+  const releaseLandingWelcome = useCallback(() => {
+    ensureSpeechQueue()?.resumeAfterUserActivation();
+  }, [ensureSpeechQueue]);
+
+  useEffect(() => {
+    if (!requestHostedSpeech || !capabilities.available || landingWelcomePendingRef.current) return;
+    landingWelcomePendingRef.current = true;
+    ensureSpeechQueue()?.enqueue([
+      {
+        id: "landing-welcome",
+        text: LANDING_WELCOME_SPEECH,
+        presentationBoundary: "landing-welcome",
+      },
+    ]);
+  }, [capabilities.available, ensureSpeechQueue, requestHostedSpeech]);
 
   const beginInitialTransition = useCallback(() => {
     if (modeRef.current !== "voice" || !capabilities.available) return;
@@ -361,6 +404,7 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
     error,
     analyser,
     workspaceTransitionPending,
+    releaseLandingWelcome,
     setMode,
     toggleListening,
     clearTranscript,

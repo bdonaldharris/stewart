@@ -28,6 +28,7 @@ from stewart.contracts import (
 from stewart.runtime import RunResult
 from stewart.speech import (
     FIXED_LIFECYCLE_PHRASES,
+    LANDING_WELCOME_SPEECH,
     MAX_SPEECH_CHARACTERS,
     SpeechFailureKind,
     SpeechProviderError,
@@ -245,6 +246,33 @@ def test_speech_endpoint_synthesizes_authorized_fixed_lifecycle_phrase_as_mp3() 
     assert response.headers["content-type"] == "audio/mpeg"
     assert response.content == b"mp3-audio"
     speech.synthesize.assert_awaited_once_with(phrase)
+
+
+def test_speech_endpoint_authorizes_the_exact_landing_welcome_without_a_runtime_turn() -> None:
+    conversation = AsyncMock()
+    registry = BrowserConversationRegistry(factory=AsyncMock(return_value=conversation))
+    speech = _speech_synthesizer()
+    app = create_app(registry, speech=speech)
+
+    async def exercise():
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            conversation_id = (await client.post("/api/conversations")).json()["conversationId"]
+            welcome = await client.post(
+                f"/api/conversations/{conversation_id}/speech",
+                json={"text": LANDING_WELCOME_SPEECH},
+            )
+            arbitrary = await client.post(
+                f"/api/conversations/{conversation_id}/speech",
+                json={"text": "Welcome to another system."},
+            )
+            return welcome, arbitrary
+
+    welcome, arbitrary = asyncio.run(exercise())
+
+    assert welcome.status_code == 200
+    assert arbitrary.status_code == 403
+    conversation.send.assert_not_awaited()
+    speech.synthesize.assert_awaited_once_with(LANDING_WELCOME_SPEECH)
 
 
 def test_speech_endpoint_authorizes_only_emitted_stewart_text_for_conversation() -> None:
