@@ -55,9 +55,20 @@ export class BackendEventSource implements WriterRoomEventSource {
   readonly mode = "backend" as const;
   readonly canAdvance = false;
   private conversationId?: string;
+  private conversationCreation?: Promise<string>;
 
   private async ensureConversation(): Promise<string> {
     if (this.conversationId) return this.conversationId;
+    const creation = this.conversationCreation ?? this.createConversation();
+    this.conversationCreation = creation;
+    try {
+      return await creation;
+    } finally {
+      if (this.conversationCreation === creation) this.conversationCreation = undefined;
+    }
+  }
+
+  private async createConversation(): Promise<string> {
     const response = await transportFetch("/api/conversations", { method: "POST" });
     if (!response.ok) throw await responseError(response);
     const payload = (await response.json()) as { conversationId?: unknown };

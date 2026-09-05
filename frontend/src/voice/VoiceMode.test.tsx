@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -126,6 +127,24 @@ class HostedStreamingSource extends StreamingSource {
   async getSpeechAudio(text: string, signal?: AbortSignal): Promise<Blob> {
     this.speechRequests.push({ text, signal });
     return new Blob(["mp3-audio"], { type: "audio/mpeg" });
+  }
+}
+
+class StrictModeHostedStreamingSource extends StreamingSource {
+  readonly speechRequests: Array<{ text: string; signal?: AbortSignal }> = [];
+
+  getSpeechAudio(text: string, signal?: AbortSignal): Promise<Blob> {
+    this.speechRequests.push({ text, signal });
+    if (this.speechRequests.length > 1) {
+      return Promise.resolve(new Blob(["mp3-audio"], { type: "audio/mpeg" }));
+    }
+    return new Promise((_, reject) => {
+      signal?.addEventListener(
+        "abort",
+        () => reject(new DOMException("The operation was aborted.", "AbortError")),
+        { once: true },
+      );
+    });
   }
 }
 
@@ -386,6 +405,29 @@ describe("Writer's Room Voice Mode", () => {
     expect(MockRecognition.instances).toHaveLength(0);
 
     act(() => mocks.hostedAudios[0].onended?.(new Event("ended")));
+    await waitFor(() => expect(mocks.getUserMedia).toHaveBeenCalledWith({ audio: true }));
+    expect(MockRecognition.instances).toHaveLength(1);
+  });
+
+  it("replays an aborted StrictMode welcome with a live queue before recording", async () => {
+    const mocks = installBrowserMocks();
+    const source = new StrictModeHostedStreamingSource();
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <App eventSource={source} />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(source.speechRequests).toHaveLength(2));
+    expect(source.speechRequests[0].signal?.aborted).toBe(true);
+    expect(source.speechRequests[1].signal?.aborted).toBe(false);
+    await waitFor(() => expect(mocks.hostedAudios).toHaveLength(1));
+
+    await user.click(screen.getByRole("button", { name: "Start listening" }));
+    expect(mocks.getUserMedia).not.toHaveBeenCalled();
+    act(() => mocks.hostedAudios[0].onended?.(new Event("ended")));
+
     await waitFor(() => expect(mocks.getUserMedia).toHaveBeenCalledWith({ audio: true }));
     expect(MockRecognition.instances).toHaveLength(1);
   });

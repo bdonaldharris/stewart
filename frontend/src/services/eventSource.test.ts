@@ -161,6 +161,41 @@ describe("Writer's Room event sources", () => {
     );
   });
 
+  it("shares conversation creation when an aborted welcome attempt is replayed", async () => {
+    let resolveConversation: (response: Response) => void;
+    const conversation = new Promise<Response>((resolve) => {
+      resolveConversation = resolve;
+    });
+    const audio = new Uint8Array([1, 2, 3]);
+    const fetchMock = vi.fn<typeof fetch>((input, init) => {
+      if (input === "/api/conversations") return conversation;
+      if (init?.signal?.aborted) {
+        return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
+      }
+      return Promise.resolve(
+        new Response(audio, { status: 200, headers: { "Content-Type": "audio/mpeg" } }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const source = new BackendEventSource();
+    const firstAttempt = new AbortController();
+    const abandoned = source.getSpeechAudio("Welcome to Stewart. What story are we protecting today?", firstAttempt.signal);
+    const replayed = source.getSpeechAudio("Welcome to Stewart. What story are we protecting today?");
+
+    firstAttempt.abort();
+    resolveConversation!(
+      new Response(JSON.stringify({ conversationId: "conversation-strict-mode" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(abandoned).rejects.toThrow("local browser transport is unavailable");
+    expect((await replayed).size).toBeGreaterThan(0);
+    expect(fetchMock.mock.calls.filter(([input]) => input === "/api/conversations")).toHaveLength(1);
+    expect(fetchMock.mock.calls).toHaveLength(3);
+  });
+
   it("rejects unusable hosted audio so the voice queue can fall back", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

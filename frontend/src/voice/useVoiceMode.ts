@@ -394,6 +394,10 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
   useEffect(
     () => () => {
       speechQueueRef.current?.dispose();
+      speechQueueRef.current = undefined;
+      landingWelcomePendingRef.current = false;
+      landingWelcomeScheduledRef.current = false;
+      microphoneAfterWelcomeRef.current = false;
       recognitionRef.current?.abort();
       releaseMicrophone();
     },
