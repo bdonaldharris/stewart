@@ -16,9 +16,11 @@ STEWART_AUDIO_ENCODING = texttospeech.AudioEncoding.MP3
 STEWART_AUDIO_CONTENT_TYPE = "audio/mpeg"
 STEWART_SPEECH_TIMEOUT_SECONDS = 5.0
 MAX_SPEECH_CHARACTERS = 1_000
+LANDING_WELCOME_SPEECH = "Welcome to Stewart. What story are we protecting today?"
 
 FIXED_LIFECYCLE_PHRASES = frozenset(
     {
+        LANDING_WELCOME_SPEECH,
         "I'm sending your proposal to the investigation team.",
         "Lore investigation complete.",
         "Timeline investigation complete.",

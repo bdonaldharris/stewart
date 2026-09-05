@@ -4,6 +4,7 @@ import type { WriterRoomEventBatch } from "../model/events";
 import {
   BrowserSpeechQueue,
   detectVoiceCapabilities,
+  LANDING_WELCOME_SPEECH,
   VoiceAnnouncementMapper,
   type BrowserSpeechRecognition,
   type BrowserSpeechRecognitionErrorEvent,
@@ -38,7 +39,8 @@ export interface VoiceModeController {
 
 export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceModeController {
   const capabilities = useMemo(() => detectVoiceCapabilities(), []);
-  const [mode, setModeState] = useState<ConversationMode>("text");
+  const initialMode: ConversationMode = capabilities.available ? "voice" : "text";
+  const [mode, setModeState] = useState<ConversationMode>(initialMode);
   const [state, setState] = useState<VoiceInteractionState>("ready");
   const [finalTranscript, setFinalTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
@@ -46,7 +48,7 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
   const [analyser, setAnalyser] = useState<AnalyserNode>();
   const [workspaceTransitionPending, setWorkspaceTransitionPending] = useState(false);
 
-  const modeRef = useRef<ConversationMode>("text");
+  const modeRef = useRef<ConversationMode>(initialMode);
   const stateRef = useRef<VoiceInteractionState>("ready");
   const finalTranscriptRef = useRef("");
   const interimTranscriptRef = useRef("");
@@ -60,6 +62,10 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
   const initialTransitionArmedRef = useRef(false);
   const investigationBoundaryInFlightRef = useRef(false);
   const hostedSpeechRef = useRef(requestHostedSpeech);
+  const landingWelcomePendingRef = useRef(false);
+  const landingWelcomeScheduledRef = useRef(false);
+  const microphoneAfterWelcomeRef = useRef(false);
+  const startListeningRef = useRef<(() => Promise<void>) | undefined>(undefined);
 
   useEffect(() => {
     hostedSpeechRef.current = requestHostedSpeech;
@@ -101,6 +107,15 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
           else if (stateRef.current === "speaking") updateState("ready");
         },
         onItemSettled: (item) => {
+          if (item.presentationBoundary === "landing-welcome") {
+            landingWelcomePendingRef.current = false;
+            const shouldStartListening =
+              microphoneAfterWelcomeRef.current && modeRef.current === "voice";
+            microphoneAfterWelcomeRef.current = false;
+            if (shouldStartListening) {
+              void startListeningRef.current?.();
+            }
+          }
           if (item.presentationBoundary === "investigation-start") {
             releaseWorkspaceTransition();
           }
@@ -140,8 +155,14 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
   const setMode = useCallback(
     (next: ConversationMode) => {
       if (next === "voice" && !capabilities.available) return;
-      if (next === modeRef.current) return;
+      if (next === modeRef.current) {
+        if (landingWelcomePendingRef.current) {
+          ensureSpeechQueue()?.resumeAfterUserActivation();
+        }
+        return;
+      }
       if (next === "text") {
+        microphoneAfterWelcomeRef.current = false;
         cancelVoiceOutput();
         stopRecognition(true);
         releaseWorkspaceTransition();
@@ -281,14 +302,42 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
     updateState,
   ]);
 
+  useEffect(() => {
+    startListeningRef.current = startListening;
+  }, [startListening]);
+
   const toggleListening = useCallback(async () => {
+    if (landingWelcomePendingRef.current) {
+      microphoneAfterWelcomeRef.current = true;
+      ensureSpeechQueue()?.resumeAfterUserActivation();
+      return;
+    }
     if (stateRef.current === "listening") {
       updateState("processing");
       stopRecognition(false);
       return;
     }
     await startListening();
-  }, [startListening, stopRecognition, updateState]);
+  }, [ensureSpeechQueue, startListening, stopRecognition, updateState]);
+
+  useEffect(() => {
+    if (
+      !requestHostedSpeech ||
+      !capabilities.available ||
+      landingWelcomeScheduledRef.current
+    ) {
+      return;
+    }
+    landingWelcomeScheduledRef.current = true;
+    landingWelcomePendingRef.current = true;
+    ensureSpeechQueue()?.enqueue([
+      {
+        id: "landing-welcome",
+        text: LANDING_WELCOME_SPEECH,
+        presentationBoundary: "landing-welcome",
+      },
+    ]);
+  }, [capabilities.available, ensureSpeechQueue, requestHostedSpeech]);
 
   const beginInitialTransition = useCallback(() => {
     if (modeRef.current !== "voice" || !capabilities.available) return;
@@ -345,6 +394,10 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
   useEffect(
     () => () => {
       speechQueueRef.current?.dispose();
+      speechQueueRef.current = undefined;
+      landingWelcomePendingRef.current = false;
+      landingWelcomeScheduledRef.current = false;
+      microphoneAfterWelcomeRef.current = false;
       recognitionRef.current?.abort();
       releaseMicrophone();
     },

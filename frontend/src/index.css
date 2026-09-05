@@ -804,6 +804,35 @@ button:disabled {
   border-radius: 50%;
 }
 
+.clarification-mark-waiting {
+  animation: clarification-pulse 2.4s ease-in-out infinite;
+}
+
+.clarification-waiting-lines {
+  display: flex;
+  width: 7rem;
+  margin: 1.15rem auto 0;
+  gap: 0.35rem;
+  justify-content: center;
+}
+
+.clarification-waiting-lines span {
+  width: 1.55rem;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--teal-solid);
+  animation: clarification-line 2.4s ease-in-out infinite;
+  opacity: 0.24;
+}
+
+.clarification-waiting-lines span:nth-child(2) {
+  animation-delay: 180ms;
+}
+
+.clarification-waiting-lines span:nth-child(3) {
+  animation-delay: 360ms;
+}
+
 .clarification-panel h2 {
   margin-top: 0.7rem;
   font-family: Georgia, "Times New Roman", serif;
@@ -868,6 +897,43 @@ button:disabled {
   color: var(--text-on-teal);
   font-family: Georgia, serif;
   background: var(--teal-solid);
+}
+
+.report-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.report-export-button {
+  border: 0.5px solid var(--teal-border);
+  border-radius: 999px;
+  padding: 0.45rem 0.7rem;
+  color: var(--teal-solid);
+  font-size: 0.68rem;
+  font-weight: 500;
+  background: var(--teal-fill);
+}
+
+.report-export-button:hover:not(:disabled),
+.report-export-button:focus-visible {
+  border-color: var(--teal-solid);
+  outline: none;
+}
+
+.report-export-button:focus-visible {
+  outline: 2px solid var(--teal-solid);
+  outline-offset: 2px;
+}
+
+.report-export-button:disabled {
+  opacity: 0.62;
+}
+
+.report-export-error {
+  margin: 1rem 0 -0.25rem;
+  color: #713a35;
+  font-size: 0.75rem;
 }
 
 .report-assessment {
@@ -1189,6 +1255,28 @@ button:disabled {
   }
   50% {
     opacity: 0.55;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes clarification-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(10 79 71 / 0%);
+  }
+  50% {
+    box-shadow: 0 0 0 0.5rem rgb(10 79 71 / 8%);
+  }
+}
+
+@keyframes clarification-line {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: scaleX(0.76);
+  }
+  50% {
+    opacity: 0.58;
     transform: scaleX(1);
   }
 }

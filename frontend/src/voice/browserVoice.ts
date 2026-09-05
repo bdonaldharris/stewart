@@ -6,13 +6,15 @@ export type VoiceInteractionState = "ready" | "listening" | "processing" | "spea
 export interface SpeechQueueItem {
   id: string;
   text: string;
-  presentationBoundary?: "investigation-start";
+  presentationBoundary?: "investigation-start" | "landing-welcome";
 }
 
 export type SpeechQueueSettlement = "completed" | "error" | "cancelled";
 
 export const INVESTIGATION_COORDINATION_SPEECH =
   "I'm sending your proposal to the investigation team.";
+export const LANDING_WELCOME_SPEECH = "Welcome to Stewart. What story are we protecting today?";
+export const LANDING_WELCOME_SETTLEMENT_TIMEOUT_MS = 8_000;
 
 export interface BrowserSpeechRecognitionEvent extends Event {
   readonly resultIndex: number;
@@ -252,6 +254,9 @@ export class BrowserSpeechQueue {
   private selectedVoice: SpeechSynthesisVoice | null = null;
   private pinnedVoice: SpeechSynthesisVoice | null = null;
   private voicePinned = false;
+  private blockedForUserActivation = false;
+  private landingWelcomeRetryAttempted = false;
+  private landingWelcomeSettlementTimer?: ReturnType<typeof setTimeout>;
   private readonly handleVoicesChanged = () => this.refreshVoice();
 
   constructor(private readonly options: SpeechQueueOptions) {
@@ -272,6 +277,20 @@ export class BrowserSpeechQueue {
     this.clear(true);
   }
 
+  resumeAfterUserActivation(): void {
+    const welcome =
+      this.current?.presentationBoundary === "landing-welcome"
+        ? this.current
+        : this.pending.find((item) => item.presentationBoundary === "landing-welcome");
+    if (welcome) {
+      this.landingWelcomeRetryAttempted = true;
+      if (this.current === welcome) this.armLandingWelcomeSettlement(welcome, this.generation);
+    }
+    if (!this.blockedForUserActivation) return;
+    this.blockedForUserActivation = false;
+    this.advance();
+  }
+
   dispose(): void {
     this.clear(false);
     this.options.synthesis.removeEventListener("voiceschanged", this.handleVoicesChanged);
@@ -281,6 +300,9 @@ export class BrowserSpeechQueue {
     const cancelled = this.current ? [this.current, ...this.pending] : [...this.pending];
     this.generation += 1;
     this.pending.length = 0;
+    this.blockedForUserActivation = false;
+    this.landingWelcomeRetryAttempted = false;
+    this.clearLandingWelcomeSettlementTimer();
     this.current = undefined;
     this.currentVoice = null;
     this.browserFallbackStarted = false;
@@ -293,7 +315,7 @@ export class BrowserSpeechQueue {
   }
 
   private advance(): void {
-    if (this.current) return;
+    if (this.current || this.blockedForUserActivation) return;
     const next = this.pending.shift();
     if (!next) {
       this.options.onSpeakingChange(false);
@@ -303,6 +325,12 @@ export class BrowserSpeechQueue {
     this.current = next;
     this.browserFallbackStarted = false;
     const generation = this.generation;
+    if (
+      next.presentationBoundary === "landing-welcome" &&
+      this.landingWelcomeRetryAttempted
+    ) {
+      this.armLandingWelcomeSettlement(next, generation);
+    }
     this.options.onSpeakingChange(true);
     if (this.options.hosted) {
       void this.playHosted(next, generation);
@@ -334,8 +362,24 @@ export class BrowserSpeechQueue {
       };
       audio.onerror = () => this.fallbackToBrowser(item, generation);
       await audio.play();
-    } catch {
+    } catch (error) {
       if (generation !== this.generation || this.current !== item) return;
+      if (isAutoplayBlocked(error)) {
+        if (
+          item.presentationBoundary === "landing-welcome" &&
+          this.landingWelcomeRetryAttempted
+        ) {
+          this.stopHostedPlayback();
+          this.finish(generation, "cancelled");
+          return;
+        }
+        this.current = undefined;
+        this.stopHostedPlayback();
+        this.pending.unshift(item);
+        this.blockedForUserActivation = true;
+        this.options.onSpeakingChange(false);
+        return;
+      }
       this.fallbackToBrowser(item, generation);
     }
   }
@@ -378,10 +422,31 @@ export class BrowserSpeechQueue {
       this.pinnedVoice = null;
     }
     this.current = undefined;
+    if (completedItem?.presentationBoundary === "landing-welcome") {
+      this.landingWelcomeRetryAttempted = false;
+      this.clearLandingWelcomeSettlementTimer();
+    }
     this.currentVoice = null;
     this.browserFallbackStarted = false;
     if (completedItem) this.options.onItemSettled?.(completedItem, settlement);
     this.advance();
+  }
+
+  private armLandingWelcomeSettlement(item: SpeechQueueItem, generation: number): void {
+    if (item.presentationBoundary !== "landing-welcome") return;
+    this.clearLandingWelcomeSettlementTimer();
+    this.landingWelcomeSettlementTimer = setTimeout(() => {
+      if (generation !== this.generation || this.current !== item) return;
+      this.stopHostedPlayback();
+      this.options.synthesis.cancel();
+      this.finish(generation, "error");
+    }, LANDING_WELCOME_SETTLEMENT_TIMEOUT_MS);
+  }
+
+  private clearLandingWelcomeSettlementTimer(): void {
+    if (this.landingWelcomeSettlementTimer === undefined) return;
+    clearTimeout(this.landingWelcomeSettlementTimer);
+    this.landingWelcomeSettlementTimer = undefined;
   }
 
   private stopHostedPlayback(): void {
@@ -405,4 +470,13 @@ export class BrowserSpeechQueue {
     const voices = this.options.synthesis.getVoices();
     this.selectedVoice = selectStewartVoice(voices);
   }
+}
+
+function isAutoplayBlocked(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    Reflect.get(error, "name") === "NotAllowedError"
+  );
 }

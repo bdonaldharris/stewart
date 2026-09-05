@@ -43,6 +43,7 @@ export function App({ eventSource }: AppProps) {
   const impactCompletionCommittedRef = useRef(false);
 
   const fixtureMode = source.mode === "fixture";
+  const awaitingClarification = state.phase === "conversation" && state.needsWriterInput;
   const specialistsInWorkspace = agentIds.some((agent) => {
     const status = state.agents[agent].status;
     return status !== "complete" && status !== "idle";
@@ -243,13 +244,28 @@ export function App({ eventSource }: AppProps) {
                 {state.phase === "conversation" ? (
                   <section className="clarification-panel panel">
                     <div>
-                      <div className="clarification-mark">S</div>
+                      <div
+                        className={`clarification-mark ${awaitingClarification ? "clarification-mark-waiting" : ""}`}
+                      >
+                        S
+                      </div>
                       <p className="eyebrow">Clarification</p>
                       <h2>Stewart is refining the investigation.</h2>
                       <p>
                         Answer in the conversation. Specialist activity will appear here when the
                         investigation begins.
                       </p>
+                      {awaitingClarification && (
+                        <div
+                          className="clarification-waiting-lines"
+                          data-testid="clarification-waiting-indicator"
+                          aria-hidden="true"
+                        >
+                          <span />
+                          <span />
+                          <span />
+                        </div>
+                      )}
                     </div>
                   </section>
                 ) : (

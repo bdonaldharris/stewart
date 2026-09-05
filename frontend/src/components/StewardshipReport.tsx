@@ -1,4 +1,7 @@
+import { useState } from "react";
+
 import type { StewardshipReportData } from "../model/events";
+import { exportStewardshipReport } from "../services/exportStewardshipReport";
 
 interface StewardshipReportProps {
   report: StewardshipReportData;
@@ -18,6 +21,22 @@ function ReportList({ items }: { items: string[] }) {
 }
 
 export function StewardshipReport({ report }: StewardshipReportProps) {
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string>();
+
+  async function handleExport() {
+    if (exporting) return;
+    setExporting(true);
+    setExportError(undefined);
+    try {
+      await exportStewardshipReport(report);
+    } catch {
+      setExportError("The PDF could not be prepared. Please try again.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <article className="report-panel" aria-label="Stewardship Report">
       <header className="report-header">
@@ -26,10 +45,26 @@ export function StewardshipReport({ report }: StewardshipReportProps) {
             Stewardship Report
           </h1>
         </div>
-        <div className="report-seal" aria-hidden="true">
-          S
+        <div className="report-header-actions">
+          <button
+            type="button"
+            className="report-export-button"
+            disabled={exporting}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? "Preparing PDF…" : "Export PDF"}
+          </button>
+          <div className="report-seal" aria-hidden="true">
+            S
+          </div>
         </div>
       </header>
+
+      {exportError && (
+        <p className="report-export-error" role="status">
+          {exportError}
+        </p>
+      )}
 
       <section className="report-assessment">
         <p className="eyebrow">Stewart&apos;s Assessment</p>

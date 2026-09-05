@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -9,6 +10,10 @@ import type {
   BrowserSpeechRecognitionErrorEvent,
   BrowserSpeechRecognitionEvent,
   HostedAudio,
+} from "./browserVoice";
+import {
+  LANDING_WELCOME_SPEECH,
+  LANDING_WELCOME_SETTLEMENT_TIMEOUT_MS,
 } from "./browserVoice";
 
 class MockRecognition extends EventTarget {
@@ -125,6 +130,24 @@ class HostedStreamingSource extends StreamingSource {
   }
 }
 
+class StrictModeHostedStreamingSource extends StreamingSource {
+  readonly speechRequests: Array<{ text: string; signal?: AbortSignal }> = [];
+
+  getSpeechAudio(text: string, signal?: AbortSignal): Promise<Blob> {
+    this.speechRequests.push({ text, signal });
+    if (this.speechRequests.length > 1) {
+      return Promise.resolve(new Blob(["mp3-audio"], { type: "audio/mpeg" }));
+    }
+    return new Promise((_, reject) => {
+      signal?.addEventListener(
+        "abort",
+        () => reject(new DOMException("The operation was aborted.", "AbortError")),
+        { once: true },
+      );
+    });
+  }
+}
+
 class FailingHostedStreamingSource extends StreamingSource {
   readonly getSpeechAudio = vi.fn(async () => {
     throw new Error("Hosted speech unavailable");
@@ -174,7 +197,9 @@ function restore(target: object, key: PropertyKey, descriptor?: PropertyDescript
   else Reflect.deleteProperty(target, key);
 }
 
-function installBrowserMocks(options: { permissionDenied?: boolean } = {}): BrowserMocks {
+function installBrowserMocks(
+  options: { permissionDenied?: boolean; hostedPlayErrors?: Error[] } = {},
+): BrowserMocks {
   MockRecognition.instances = [];
   const trackStop = vi.fn();
   const stream = { getTracks: () => [{ stop: trackStop }] } as unknown as MediaStream;
@@ -214,9 +239,12 @@ function installBrowserMocks(options: { permissionDenied?: boolean } = {}): Brow
     getVoices: vi.fn(() => [defaultVoice]),
   });
   const hostedAudios: MockHostedAudio[] = [];
+  const hostedPlayErrors = [...(options.hostedPlayErrors ?? [])];
   class MockAudio {
     constructor(source: string) {
       const audio = new MockHostedAudio(source);
+      const playError = hostedPlayErrors.shift();
+      if (playError) audio.play.mockRejectedValue(playError);
       hostedAudios.push(audio);
       return audio;
     }
@@ -284,9 +312,20 @@ function installBrowserMocks(options: { permissionDenied?: boolean } = {}): Brow
 async function submitVoiceProposal(
   user: ReturnType<typeof userEvent.setup>,
   transcript: string,
+  mocks: BrowserMocks,
 ) {
   await user.click(screen.getByRole("radio", { name: "Voice" }));
   await user.click(screen.getByRole("button", { name: "Start listening" }));
+  if (MockRecognition.instances.length === 0) {
+    const hostedAudio = mocks.hostedAudios.at(-1);
+    if (hostedAudio) {
+      act(() => hostedAudio.onended?.(new Event("ended")));
+    } else {
+      await waitFor(() => expect(mocks.utterances.length).toBeGreaterThan(0));
+      act(() => mocks.utterances.at(-1)?.onend?.());
+    }
+  }
+  await waitFor(() => expect(MockRecognition.instances.length).toBeGreaterThan(0));
   const recognition = MockRecognition.instances.at(-1);
   if (!recognition) throw new Error("Recognition did not start");
   act(() => recognition.result(transcript, true));
@@ -310,21 +349,17 @@ afterEach(() => {
 });
 
 describe("Writer's Room Voice Mode", () => {
-  it("keeps Text as the focused default and preserves the same conversation across mode switches", async () => {
+  it("defaults to Voice when available without requesting microphone access and preserves the session across mode switches", async () => {
     const mocks = installBrowserMocks();
     const source = new RecordingSource();
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
-    const textInput = screen.getByPlaceholderText(
-      "Describe the story idea you want Stewart to investigate…",
-    );
-    expect(screen.getByRole("radio", { name: "Text" })).toHaveAttribute("aria-checked", "true");
-    expect(textInput).toHaveFocus();
-
-    await user.click(screen.getByRole("radio", { name: "Voice" }));
+    expect(screen.getByRole("radio", { name: "Voice" })).toHaveAttribute("aria-checked", "true");
     expect(mocks.getUserMedia).not.toHaveBeenCalled();
+    expect(MockRecognition.instances).toHaveLength(0);
     await user.click(screen.getByRole("radio", { name: "Text" }));
+    expect(screen.getByRole("radio", { name: "Text" })).toHaveAttribute("aria-checked", "true");
     await user.type(
       screen.getByPlaceholderText("Describe the story idea you want Stewart to investigate…"),
       "A continuing proposal",
@@ -335,14 +370,156 @@ describe("Writer's Room Voice Mode", () => {
     expect(screen.getByText("A continuing proposal")).toBeInTheDocument();
   });
 
+  it("presents one hosted landing welcome without adding a Writer's Room message", async () => {
+    const mocks = installBrowserMocks();
+    const source = new HostedStreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await waitFor(() => expect(source.speechRequests).toHaveLength(1));
+    expect(source.speechRequests[0].text).toBe(LANDING_WELCOME_SPEECH);
+    expect(source.sent).toEqual([]);
+    expect(screen.queryByText(LANDING_WELCOME_SPEECH)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "Text" }));
+    expect(mocks.hostedAudios[0].pause).toHaveBeenCalledOnce();
+    expect(
+      screen.getByPlaceholderText("Describe the story idea you want Stewart to investigate…"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "Voice" }));
+
+    expect(source.speechRequests).toHaveLength(1);
+    expect(source.sent).toEqual([]);
+  });
+
+  it("waits for the hosted landing welcome before opening microphone capture", async () => {
+    const mocks = installBrowserMocks();
+    const source = new HostedStreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await waitFor(() => expect(mocks.hostedAudios).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "Start listening" }));
+
+    expect(mocks.getUserMedia).not.toHaveBeenCalled();
+    expect(MockRecognition.instances).toHaveLength(0);
+
+    act(() => mocks.hostedAudios[0].onended?.(new Event("ended")));
+    await waitFor(() => expect(mocks.getUserMedia).toHaveBeenCalledWith({ audio: true }));
+    expect(MockRecognition.instances).toHaveLength(1);
+  });
+
+  it("replays an aborted StrictMode welcome with a live queue before recording", async () => {
+    const mocks = installBrowserMocks();
+    const source = new StrictModeHostedStreamingSource();
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <App eventSource={source} />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(source.speechRequests).toHaveLength(2));
+    expect(source.speechRequests[0].signal?.aborted).toBe(true);
+    expect(source.speechRequests[1].signal?.aborted).toBe(false);
+    await waitFor(() => expect(mocks.hostedAudios).toHaveLength(1));
+
+    await user.click(screen.getByRole("button", { name: "Start listening" }));
+    expect(mocks.getUserMedia).not.toHaveBeenCalled();
+    act(() => mocks.hostedAudios[0].onended?.(new Event("ended")));
+
+    await waitFor(() => expect(mocks.getUserMedia).toHaveBeenCalledWith({ audio: true }));
+    expect(MockRecognition.instances).toHaveLength(1);
+  });
+
+  it("settles a twice-blocked welcome and starts recording on the first Record interaction", async () => {
+    const autoplayBlocked = Object.assign(new Error("User activation is required."), {
+      name: "NotAllowedError",
+    });
+    const mocks = installBrowserMocks({ hostedPlayErrors: [autoplayBlocked, autoplayBlocked] });
+    const source = new HostedStreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await waitFor(() => expect(source.speechRequests).toHaveLength(1));
+    await waitFor(() => expect(mocks.hostedAudios[0].pause).toHaveBeenCalledOnce());
+    await user.click(screen.getByRole("button", { name: "Start listening" }));
+
+    await waitFor(() => expect(source.speechRequests).toHaveLength(2));
+    await waitFor(() => expect(mocks.getUserMedia).toHaveBeenCalledWith({ audio: true }));
+    expect(MockRecognition.instances).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Stop listening" })).toBeEnabled();
+  });
+
+  it("waits for a successful retried welcome to end before opening microphone capture", async () => {
+    const autoplayBlocked = Object.assign(new Error("User activation is required."), {
+      name: "NotAllowedError",
+    });
+    const mocks = installBrowserMocks({ hostedPlayErrors: [autoplayBlocked] });
+    const source = new HostedStreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await waitFor(() => expect(source.speechRequests).toHaveLength(1));
+    await waitFor(() => expect(mocks.hostedAudios[0].pause).toHaveBeenCalledOnce());
+    await user.click(screen.getByRole("button", { name: "Start listening" }));
+    await waitFor(() => expect(mocks.hostedAudios).toHaveLength(2));
+
+    expect(mocks.getUserMedia).not.toHaveBeenCalled();
+    act(() => mocks.hostedAudios[1].onended?.(new Event("ended")));
+    await waitFor(() => expect(mocks.getUserMedia).toHaveBeenCalledWith({ audio: true }));
+    expect(MockRecognition.instances).toHaveLength(1);
+  });
+
+  it("settles a hosted welcome failure through browser fallback before microphone capture", async () => {
+    const mocks = installBrowserMocks();
+    const source = new FailingHostedStreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await waitFor(() => expect(mocks.utterances).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "Start listening" }));
+
+    expect(mocks.getUserMedia).not.toHaveBeenCalled();
+    act(() => mocks.utterances[0].onerror?.());
+    await waitFor(() => expect(mocks.getUserMedia).toHaveBeenCalledWith({ audio: true }));
+    expect(MockRecognition.instances).toHaveLength(1);
+  });
+
+  it("releases microphone capture when the browser fallback welcome stalls", async () => {
+    vi.useFakeTimers();
+    try {
+      const mocks = installBrowserMocks();
+      const source = new FailingHostedStreamingSource();
+      render(<App eventSource={source} />);
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(mocks.utterances).toHaveLength(1);
+
+      act(() => screen.getByRole("button", { name: "Start listening" }).click());
+      expect(mocks.getUserMedia).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(LANDING_WELCOME_SETTLEMENT_TIMEOUT_MS);
+        await Promise.resolve();
+      });
+
+      expect(mocks.getUserMedia).toHaveBeenCalledWith({ audio: true });
+      expect(MockRecognition.instances).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("captures real analyser data, previews final recognition, and requires explicit send", async () => {
     const mocks = installBrowserMocks();
     const source = new RecordingSource();
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
-    await user.click(screen.getByRole("radio", { name: "Voice" }));
-    expect(mocks.speechSynthesis.getVoices).toHaveBeenCalled();
     expect(
       screen.getByText(/Writer speech recognition may use your browser vendor's speech service/),
     ).toBeInTheDocument();
@@ -389,6 +566,7 @@ describe("Writer's Room Voice Mode", () => {
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
+    await user.click(screen.getByRole("radio", { name: "Text" }));
     const input = screen.getByPlaceholderText(
       "Describe the story idea you want Stewart to investigate…",
     );
@@ -444,7 +622,7 @@ describe("Writer's Room Voice Mode", () => {
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
-    await submitVoiceProposal(user, "A proposal for the investigation");
+    await submitVoiceProposal(user, "A proposal for the investigation", mocks);
     expect(source.sent).toEqual(["A proposal for the investigation"]);
     expect(
       screen.getByRole("heading", { name: "Bring the idea. Stewart will map what it touches." }),
@@ -495,7 +673,7 @@ describe("Writer's Room Voice Mode", () => {
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
-    await submitVoiceProposal(user, "A proposal for hosted speech");
+    await submitVoiceProposal(user, "A proposal for hosted speech", mocks);
     act(() =>
       source.emit([
         { type: "investigation_started" },
@@ -508,8 +686,8 @@ describe("Writer's Room Voice Mode", () => {
       ]),
     );
 
-    await waitFor(() => expect(source.speechRequests).toHaveLength(1));
-    expect(source.speechRequests[0].text).toBe(
+    await waitFor(() => expect(source.speechRequests).toHaveLength(2));
+    expect(source.speechRequests[1].text).toBe(
       "I'm sending your proposal to the investigation team.",
     );
     expect(mocks.speechSynthesis.speak).not.toHaveBeenCalled();
@@ -517,9 +695,9 @@ describe("Writer's Room Voice Mode", () => {
       screen.getByRole("heading", { name: "Bring the idea. Stewart will map what it touches." }),
     ).toBeInTheDocument();
 
-    act(() => mocks.hostedAudios[0].onended?.(new Event("ended")));
+    act(() => mocks.hostedAudios[1].onended?.(new Event("ended")));
     expect(screen.getByRole("heading", { name: "Specialist Workspace" })).toBeInTheDocument();
-    expect(mocks.revokeObjectURL).toHaveBeenCalledWith("blob:stewart-1");
+    expect(mocks.revokeObjectURL).toHaveBeenCalledWith("blob:stewart-2");
 
     act(() =>
       source.emit([
@@ -535,11 +713,11 @@ describe("Writer's Room Voice Mode", () => {
         },
       ]),
     );
-    await waitFor(() => expect(source.speechRequests).toHaveLength(2));
+    await waitFor(() => expect(source.speechRequests).toHaveLength(3));
     await user.click(screen.getByRole("button", { name: "Start listening" }));
 
-    expect(mocks.hostedAudios[1].pause).toHaveBeenCalledOnce();
-    expect(mocks.revokeObjectURL).toHaveBeenCalledWith("blob:stewart-2");
+    expect(mocks.hostedAudios[2].pause).toHaveBeenCalledOnce();
+    expect(mocks.revokeObjectURL).toHaveBeenCalledWith("blob:stewart-3");
     expect(mocks.speechSynthesis.cancel).toHaveBeenCalled();
     act(() => source.finish());
   });
@@ -550,14 +728,14 @@ describe("Writer's Room Voice Mode", () => {
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
-    await submitVoiceProposal(user, "A hosted proposal cancelled into Text mode");
+    await submitVoiceProposal(user, "A hosted proposal cancelled into Text mode", mocks);
     act(() => source.emit([{ type: "investigation_started" }]));
-    await waitFor(() => expect(mocks.hostedAudios).toHaveLength(1));
+    await waitFor(() => expect(mocks.hostedAudios).toHaveLength(2));
 
     await user.click(screen.getByRole("radio", { name: "Text" }));
 
-    expect(mocks.hostedAudios[0].pause).toHaveBeenCalledOnce();
-    expect(mocks.revokeObjectURL).toHaveBeenCalledWith("blob:stewart-1");
+    expect(mocks.hostedAudios[1].pause).toHaveBeenCalledOnce();
+    expect(mocks.revokeObjectURL).toHaveBeenCalledWith("blob:stewart-2");
     expect(screen.getByRole("heading", { name: "Specialist Workspace" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Text" })).toHaveAttribute("aria-checked", "true");
     act(() => source.finish());
@@ -569,18 +747,19 @@ describe("Writer's Room Voice Mode", () => {
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
-    await submitVoiceProposal(user, "A proposal with hosted speech unavailable");
+    await submitVoiceProposal(user, "A proposal with hosted speech unavailable", mocks);
     act(() => source.emit([{ type: "investigation_started" }]));
-    await waitFor(() => expect(mocks.utterances).toHaveLength(1));
+    await waitFor(() => expect(mocks.utterances).toHaveLength(2));
 
-    expect(source.getSpeechAudio).toHaveBeenCalledWith(
+    expect(source.getSpeechAudio).toHaveBeenNthCalledWith(
+      2,
       "I'm sending your proposal to the investigation team.",
       expect.any(AbortSignal),
     );
     expect(
       screen.getByRole("heading", { name: "Bring the idea. Stewart will map what it touches." }),
     ).toBeInTheDocument();
-    act(() => mocks.utterances[0].onend?.());
+    act(() => mocks.utterances[1].onend?.());
 
     expect(screen.getByRole("heading", { name: "Specialist Workspace" })).toBeInTheDocument();
     act(() => source.finish());
@@ -592,7 +771,7 @@ describe("Writer's Room Voice Mode", () => {
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
-    await submitVoiceProposal(user, "A proposal with a speech failure");
+    await submitVoiceProposal(user, "A proposal with a speech failure", mocks);
     act(() => source.emit([{ type: "investigation_started" }]));
     await waitFor(() => expect(mocks.utterances).toHaveLength(1));
 
@@ -608,7 +787,7 @@ describe("Writer's Room Voice Mode", () => {
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
-    await submitVoiceProposal(user, "A proposal cancelled into Text mode");
+    await submitVoiceProposal(user, "A proposal cancelled into Text mode", mocks);
     act(() => source.emit([{ type: "investigation_started" }]));
     await waitFor(() => expect(mocks.utterances).toHaveLength(1));
 
@@ -626,7 +805,7 @@ describe("Writer's Room Voice Mode", () => {
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
-    await submitVoiceProposal(user, "A proposal with meaningful impact");
+    await submitVoiceProposal(user, "A proposal with meaningful impact", mocks);
     act(() =>
       source.emit([
         { type: "investigation_started" },
@@ -744,6 +923,7 @@ describe("Writer's Room Voice Mode", () => {
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
+    expect(screen.getByRole("radio", { name: "Text" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "Voice" })).toBeDisabled();
     expect(screen.getByText("Voice is unavailable in this browser.")).toBeInTheDocument();
     const input = screen.getByPlaceholderText(
