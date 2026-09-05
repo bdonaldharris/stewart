@@ -310,21 +310,17 @@ afterEach(() => {
 });
 
 describe("Writer's Room Voice Mode", () => {
-  it("keeps Text as the focused default and preserves the same conversation across mode switches", async () => {
+  it("defaults to Voice when available without requesting microphone access and preserves the session across mode switches", async () => {
     const mocks = installBrowserMocks();
     const source = new RecordingSource();
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
-    const textInput = screen.getByPlaceholderText(
-      "Describe the story idea you want Stewart to investigate…",
-    );
-    expect(screen.getByRole("radio", { name: "Text" })).toHaveAttribute("aria-checked", "true");
-    expect(textInput).toHaveFocus();
-
-    await user.click(screen.getByRole("radio", { name: "Voice" }));
+    expect(screen.getByRole("radio", { name: "Voice" })).toHaveAttribute("aria-checked", "true");
     expect(mocks.getUserMedia).not.toHaveBeenCalled();
+    expect(MockRecognition.instances).toHaveLength(0);
     await user.click(screen.getByRole("radio", { name: "Text" }));
+    expect(screen.getByRole("radio", { name: "Text" })).toHaveAttribute("aria-checked", "true");
     await user.type(
       screen.getByPlaceholderText("Describe the story idea you want Stewart to investigate…"),
       "A continuing proposal",
@@ -341,8 +337,6 @@ describe("Writer's Room Voice Mode", () => {
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
-    await user.click(screen.getByRole("radio", { name: "Voice" }));
-    expect(mocks.speechSynthesis.getVoices).toHaveBeenCalled();
     expect(
       screen.getByText(/Writer speech recognition may use your browser vendor's speech service/),
     ).toBeInTheDocument();
@@ -389,6 +383,7 @@ describe("Writer's Room Voice Mode", () => {
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
+    await user.click(screen.getByRole("radio", { name: "Text" }));
     const input = screen.getByPlaceholderText(
       "Describe the story idea you want Stewart to investigate…",
     );
@@ -744,6 +739,7 @@ describe("Writer's Room Voice Mode", () => {
     const user = userEvent.setup();
     render(<App eventSource={source} />);
 
+    expect(screen.getByRole("radio", { name: "Text" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "Voice" })).toBeDisabled();
     expect(screen.getByText("Voice is unavailable in this browser.")).toBeInTheDocument();
     const input = screen.getByPlaceholderText(

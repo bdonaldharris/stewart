@@ -1,10 +1,17 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { vi } from "vitest";
 
 import { App } from "./App";
 import { StewardshipReport } from "./components/StewardshipReport";
 import { createDemoFixture } from "./fixtures/demoFixture";
 import type { WriterRoomEventSource } from "./services/eventSource";
+
+const exportStewardshipReport = vi.hoisted(() => vi.fn());
+
+vi.mock("./services/exportStewardshipReport", () => ({
+  exportStewardshipReport,
+}));
 
 describe("Writer's Room", () => {
   it("focuses the writer input when the application starts", () => {
@@ -16,6 +23,7 @@ describe("Writer's Room", () => {
     expect(
       screen.queryByText(/development fixture|not live|representative/i),
     ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("clarification-waiting-indicator")).not.toBeInTheDocument();
   });
 
   it("moves completed specialists into returned investigations before the report", async () => {
@@ -143,6 +151,11 @@ describe("Writer's Room", () => {
       screen.getByText("Before I begin: what point in the MCU timeline should frame this proposal?"),
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Stewart is refining the investigation." })).toBeInTheDocument();
+    expect(screen.getByTestId("clarification-waiting-indicator")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Specialist Workspace" })).not.toBeInTheDocument();
 
     await user.type(
@@ -152,6 +165,7 @@ describe("Writer's Room", () => {
     await user.click(screen.getByRole("button", { name: "Send proposal to Stewart" }));
 
     expect(screen.getByRole("heading", { name: "Specialist Workspace" })).toBeInTheDocument();
+    expect(screen.queryByTestId("clarification-waiting-indicator")).not.toBeInTheDocument();
     expect(screen.getByTestId("agent-card-impact")).toHaveTextContent(
       "Waiting for specialist findings",
     );
@@ -221,5 +235,56 @@ describe("Writer's Room", () => {
     expect(screen.queryByText("Opportunities")).not.toBeInTheDocument();
     expect(screen.queryByText("Audience Considerations")).not.toBeInTheDocument();
     expect(screen.getByText("Use a supporting role")).toBeInTheDocument();
+  });
+
+  it("exports the completed report with its existing normalized data and prevents duplicate requests", async () => {
+    let finishExport: (() => void) | undefined;
+    exportStewardshipReport.mockImplementationOnce(
+      () => new Promise<void>((resolve) => {
+        finishExport = resolve;
+      }),
+    );
+    const report = {
+      assessment: "A concise normalized assessment.",
+      continuityConsiderations: ["A continuity consideration."],
+      opportunities: [],
+      audienceConsiderations: [],
+      options: [],
+    };
+    const user = userEvent.setup();
+    render(<StewardshipReport report={report} />);
+
+    const exportButton = screen.getByRole("button", { name: "Export PDF" });
+    await user.click(exportButton);
+    expect(exportStewardshipReport).toHaveBeenCalledWith(report);
+    expect(screen.getByRole("button", { name: "Preparing PDF…" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Preparing PDF…" }));
+    expect(exportStewardshipReport).toHaveBeenCalledTimes(1);
+
+    finishExport?.();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Export PDF" })).toBeEnabled());
+  });
+
+  it("restores the export control and keeps the report usable if PDF generation fails", async () => {
+    exportStewardshipReport.mockRejectedValueOnce(new Error("PDF rendering failed"));
+    const user = userEvent.setup();
+    render(
+      <StewardshipReport
+        report={{
+          assessment: "A concise assessment.",
+          continuityConsiderations: [],
+          opportunities: [],
+          audienceConsiderations: [],
+          options: [],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Export PDF" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "The PDF could not be prepared. Please try again.",
+    );
+    expect(screen.getByRole("button", { name: "Export PDF" })).toBeEnabled();
+    expect(screen.getByText("A concise assessment.")).toBeInTheDocument();
   });
 });

@@ -38,7 +38,8 @@ export interface VoiceModeController {
 
 export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceModeController {
   const capabilities = useMemo(() => detectVoiceCapabilities(), []);
-  const [mode, setModeState] = useState<ConversationMode>("text");
+  const initialMode: ConversationMode = capabilities.available ? "voice" : "text";
+  const [mode, setModeState] = useState<ConversationMode>(initialMode);
   const [state, setState] = useState<VoiceInteractionState>("ready");
   const [finalTranscript, setFinalTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
@@ -46,7 +47,7 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
   const [analyser, setAnalyser] = useState<AnalyserNode>();
   const [workspaceTransitionPending, setWorkspaceTransitionPending] = useState(false);
 
-  const modeRef = useRef<ConversationMode>("text");
+  const modeRef = useRef<ConversationMode>(initialMode);
   const stateRef = useRef<VoiceInteractionState>("ready");
   const finalTranscriptRef = useRef("");
   const interimTranscriptRef = useRef("");
