@@ -152,7 +152,7 @@ export function App({ eventSource }: AppProps) {
   }
 
   return (
-    <div className="app-shell" onPointerDown={voice.releaseLandingWelcome}>
+    <div className="app-shell">
       <Header fixtureMode={fixtureMode} />
       {error && (
         <div className="error-wrap">

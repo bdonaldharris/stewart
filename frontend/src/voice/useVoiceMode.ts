@@ -27,7 +27,6 @@ export interface VoiceModeController {
   error?: string;
   analyser?: AnalyserNode;
   workspaceTransitionPending: boolean;
-  releaseLandingWelcome(): void;
   setMode(mode: ConversationMode): void;
   toggleListening(): Promise<void>;
   clearTranscript(): void;
@@ -64,6 +63,7 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
   const investigationBoundaryInFlightRef = useRef(false);
   const hostedSpeechRef = useRef(requestHostedSpeech);
   const landingWelcomePendingRef = useRef(false);
+  const landingWelcomeScheduledRef = useRef(false);
   const microphoneAfterWelcomeRef = useRef(false);
   const startListeningRef = useRef<(() => Promise<void>) | undefined>(undefined);
 
@@ -109,8 +109,10 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
         onItemSettled: (item) => {
           if (item.presentationBoundary === "landing-welcome") {
             landingWelcomePendingRef.current = false;
-            if (microphoneAfterWelcomeRef.current) {
-              microphoneAfterWelcomeRef.current = false;
+            const shouldStartListening =
+              microphoneAfterWelcomeRef.current && modeRef.current === "voice";
+            microphoneAfterWelcomeRef.current = false;
+            if (shouldStartListening) {
               void startListeningRef.current?.();
             }
           }
@@ -160,8 +162,8 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
         return;
       }
       if (next === "text") {
-        if (landingWelcomePendingRef.current) ensureSpeechQueue()?.resumeAfterUserActivation();
-        else cancelVoiceOutput();
+        microphoneAfterWelcomeRef.current = false;
+        cancelVoiceOutput();
         stopRecognition(true);
         releaseWorkspaceTransition();
         setError(undefined);
@@ -318,12 +320,15 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
     await startListening();
   }, [ensureSpeechQueue, startListening, stopRecognition, updateState]);
 
-  const releaseLandingWelcome = useCallback(() => {
-    ensureSpeechQueue()?.resumeAfterUserActivation();
-  }, [ensureSpeechQueue]);
-
   useEffect(() => {
-    if (!requestHostedSpeech || !capabilities.available || landingWelcomePendingRef.current) return;
+    if (
+      !requestHostedSpeech ||
+      !capabilities.available ||
+      landingWelcomeScheduledRef.current
+    ) {
+      return;
+    }
+    landingWelcomeScheduledRef.current = true;
     landingWelcomePendingRef.current = true;
     ensureSpeechQueue()?.enqueue([
       {
@@ -404,7 +409,6 @@ export function useVoiceMode(requestHostedSpeech?: HostedSpeechRequest): VoiceMo
     error,
     analyser,
     workspaceTransitionPending,
-    releaseLandingWelcome,
     setMode,
     toggleListening,
     clearTranscript,

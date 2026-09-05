@@ -10,7 +10,10 @@ import type {
   BrowserSpeechRecognitionEvent,
   HostedAudio,
 } from "./browserVoice";
-import { LANDING_WELCOME_SPEECH } from "./browserVoice";
+import {
+  LANDING_WELCOME_SPEECH,
+  LANDING_WELCOME_SETTLEMENT_TIMEOUT_MS,
+} from "./browserVoice";
 
 class MockRecognition extends EventTarget {
   static instances: MockRecognition[] = [];
@@ -175,7 +178,9 @@ function restore(target: object, key: PropertyKey, descriptor?: PropertyDescript
   else Reflect.deleteProperty(target, key);
 }
 
-function installBrowserMocks(options: { permissionDenied?: boolean } = {}): BrowserMocks {
+function installBrowserMocks(
+  options: { permissionDenied?: boolean; hostedPlayErrors?: Error[] } = {},
+): BrowserMocks {
   MockRecognition.instances = [];
   const trackStop = vi.fn();
   const stream = { getTracks: () => [{ stop: trackStop }] } as unknown as MediaStream;
@@ -215,9 +220,12 @@ function installBrowserMocks(options: { permissionDenied?: boolean } = {}): Brow
     getVoices: vi.fn(() => [defaultVoice]),
   });
   const hostedAudios: MockHostedAudio[] = [];
+  const hostedPlayErrors = [...(options.hostedPlayErrors ?? [])];
   class MockAudio {
     constructor(source: string) {
       const audio = new MockHostedAudio(source);
+      const playError = hostedPlayErrors.shift();
+      if (playError) audio.play.mockRejectedValue(playError);
       hostedAudios.push(audio);
       return audio;
     }
@@ -355,7 +363,10 @@ describe("Writer's Room Voice Mode", () => {
     expect(screen.queryByText(LANDING_WELCOME_SPEECH)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("radio", { name: "Text" }));
-    act(() => mocks.hostedAudios[0].onended?.(new Event("ended")));
+    expect(mocks.hostedAudios[0].pause).toHaveBeenCalledOnce();
+    expect(
+      screen.getByPlaceholderText("Describe the story idea you want Stewart to investigate…"),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("radio", { name: "Voice" }));
 
     expect(source.speechRequests).toHaveLength(1);
@@ -377,6 +388,88 @@ describe("Writer's Room Voice Mode", () => {
     act(() => mocks.hostedAudios[0].onended?.(new Event("ended")));
     await waitFor(() => expect(mocks.getUserMedia).toHaveBeenCalledWith({ audio: true }));
     expect(MockRecognition.instances).toHaveLength(1);
+  });
+
+  it("settles a twice-blocked welcome and starts recording on the first Record interaction", async () => {
+    const autoplayBlocked = Object.assign(new Error("User activation is required."), {
+      name: "NotAllowedError",
+    });
+    const mocks = installBrowserMocks({ hostedPlayErrors: [autoplayBlocked, autoplayBlocked] });
+    const source = new HostedStreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await waitFor(() => expect(source.speechRequests).toHaveLength(1));
+    await waitFor(() => expect(mocks.hostedAudios[0].pause).toHaveBeenCalledOnce());
+    await user.click(screen.getByRole("button", { name: "Start listening" }));
+
+    await waitFor(() => expect(source.speechRequests).toHaveLength(2));
+    await waitFor(() => expect(mocks.getUserMedia).toHaveBeenCalledWith({ audio: true }));
+    expect(MockRecognition.instances).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Stop listening" })).toBeEnabled();
+  });
+
+  it("waits for a successful retried welcome to end before opening microphone capture", async () => {
+    const autoplayBlocked = Object.assign(new Error("User activation is required."), {
+      name: "NotAllowedError",
+    });
+    const mocks = installBrowserMocks({ hostedPlayErrors: [autoplayBlocked] });
+    const source = new HostedStreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await waitFor(() => expect(source.speechRequests).toHaveLength(1));
+    await waitFor(() => expect(mocks.hostedAudios[0].pause).toHaveBeenCalledOnce());
+    await user.click(screen.getByRole("button", { name: "Start listening" }));
+    await waitFor(() => expect(mocks.hostedAudios).toHaveLength(2));
+
+    expect(mocks.getUserMedia).not.toHaveBeenCalled();
+    act(() => mocks.hostedAudios[1].onended?.(new Event("ended")));
+    await waitFor(() => expect(mocks.getUserMedia).toHaveBeenCalledWith({ audio: true }));
+    expect(MockRecognition.instances).toHaveLength(1);
+  });
+
+  it("settles a hosted welcome failure through browser fallback before microphone capture", async () => {
+    const mocks = installBrowserMocks();
+    const source = new FailingHostedStreamingSource();
+    const user = userEvent.setup();
+    render(<App eventSource={source} />);
+
+    await waitFor(() => expect(mocks.utterances).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "Start listening" }));
+
+    expect(mocks.getUserMedia).not.toHaveBeenCalled();
+    act(() => mocks.utterances[0].onerror?.());
+    await waitFor(() => expect(mocks.getUserMedia).toHaveBeenCalledWith({ audio: true }));
+    expect(MockRecognition.instances).toHaveLength(1);
+  });
+
+  it("releases microphone capture when the browser fallback welcome stalls", async () => {
+    vi.useFakeTimers();
+    try {
+      const mocks = installBrowserMocks();
+      const source = new FailingHostedStreamingSource();
+      render(<App eventSource={source} />);
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(mocks.utterances).toHaveLength(1);
+
+      act(() => screen.getByRole("button", { name: "Start listening" }).click());
+      expect(mocks.getUserMedia).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(LANDING_WELCOME_SETTLEMENT_TIMEOUT_MS);
+        await Promise.resolve();
+      });
+
+      expect(mocks.getUserMedia).toHaveBeenCalledWith({ audio: true });
+      expect(MockRecognition.instances).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("captures real analyser data, previews final recognition, and requires explicit send", async () => {

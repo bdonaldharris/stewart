@@ -4,6 +4,7 @@ import type { WriterRoomEventBatch } from "../model/events";
 import {
   BrowserSpeechQueue,
   LANDING_WELCOME_SPEECH,
+  LANDING_WELCOME_SETTLEMENT_TIMEOUT_MS,
   selectStewartVoice,
   VoiceAnnouncementMapper,
   type HostedAudio,
@@ -478,6 +479,43 @@ describe("browser speech queue", () => {
       expect.objectContaining({ id: "landing-welcome", text: LANDING_WELCOME_SPEECH }),
       "completed",
     );
+  });
+
+  it("settles a stalled browser fallback after a writer attempts the landing welcome", async () => {
+    vi.useFakeTimers();
+    try {
+      const browser = createSpeechHarness();
+      const hosted = createHostedHarness(vi.fn().mockRejectedValue(new Error("unavailable")));
+      const settled = vi.fn();
+      const queue = new BrowserSpeechQueue({
+        synthesis: browser.synthesis,
+        utterance: MockUtterance as unknown as typeof SpeechSynthesisUtterance,
+        hosted: hosted.options,
+        onSpeakingChange: vi.fn(),
+        onItemSettled: settled,
+      });
+
+      queue.enqueue([
+        {
+          id: "landing-welcome",
+          text: LANDING_WELCOME_SPEECH,
+          presentationBoundary: "landing-welcome",
+        },
+      ]);
+      await settlePromises();
+      expect(browser.speak).toHaveBeenCalledOnce();
+
+      queue.resumeAfterUserActivation();
+      vi.advanceTimersByTime(LANDING_WELCOME_SETTLEMENT_TIMEOUT_MS);
+
+      expect(settled).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "landing-welcome" }),
+        "error",
+      );
+      expect(browser.cancel).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uses hosted audio as the primary FIFO playback path", async () => {
